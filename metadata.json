@@ -1,0 +1,5 @@
+{
+  "name": "Generador de Vales de Almacén",
+  "description": "Aplicación para el autorrellenado y descarga de vales de salida de almacén basados en plantillas predefinidas.",
+  "requestFramePermissions": []
+}
