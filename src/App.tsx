@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/templates';
-import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings } from 'lucide-react';
+import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import * as pdfjs from 'pdfjs-dist';
@@ -158,9 +158,16 @@ export default function App() {
       setAutorizoList(autorizoList.filter((_, i) => i !== index));
     }
   };
-  const [folioCounters, setFolioCounters] = useState<{ [key: string]: number }>({
-    'F': 1, 'H': 1, 'I': 1, 'P': 1, 'O': 1, 'G': 1, 'K': 1, 'Q': 1, 'J': 1
+  const [folioCounters, setFolioCounters] = useState<{ [key: string]: number }>(() => {
+    const saved = localStorage.getItem('folioCounters');
+    return saved ? JSON.parse(saved) : {
+      'F': 1, 'H': 1, 'I': 1, 'P': 1, 'O': 1, 'G': 1, 'K': 1, 'Q': 1, 'J': 1
+    };
   });
+
+  useEffect(() => {
+    localStorage.setItem('folioCounters', JSON.stringify(folioCounters));
+  }, [folioCounters]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
   const conceptRef = useRef<HTMLTextAreaElement>(null);
@@ -393,77 +400,88 @@ export default function App() {
         format: 'letter'
       });
 
-      let isFirstPage = true;
-
       for (let i = 0; i < vouchers.length; i += 2) {
-        if (!isFirstPage) {
-          pdf.addPage([612, 792], 'portrait');
+        if (i > 0) {
+          pdf.addPage('letter', 'portrait');
         }
-        isFirstPage = false;
 
-        // Process first voucher of the pair
+        // Process first voucher (Top)
         const v1 = vouchers[i];
         const el1 = voucherRefs.current[v1.id];
         if (el1) {
           setPdfProgress({ current: i + 1, total: vouchers.length });
           const canvas1 = await html2canvas(el1, { 
-            scale: 4, 
+            scale: 2, 
             useCORS: true, 
             backgroundColor: '#ffffff',
             logging: false,
             width: 816,
             height: 528,
-            windowWidth: 816,
-            windowHeight: 528,
+            scrollX: 0,
+            scrollY: 0,
             onclone: (clonedDoc) => {
               const el = clonedDoc.getElementById(`voucher-${v1.id}`);
               if (el) {
-                el.style.opacity = '1';
+                el.style.transform = 'none';
+                el.style.scale = '1';
                 el.style.position = 'relative';
                 el.style.left = '0';
                 el.style.top = '0';
                 el.style.display = 'flex';
                 el.style.visibility = 'visible';
-                // Force a standard font to prevent overlapping
-                el.style.fontFamily = 'Arial, sans-serif';
+                el.style.opacity = '1';
+                el.style.width = '816px';
+                el.style.height = '528px';
+                
+                const allDivs = el.getElementsByTagName('div');
+                for (let j = 0; j < allDivs.length; j++) {
+                  (allDivs[j] as HTMLElement).style.transform = 'none';
+                }
               }
             }
           });
-          const img1 = canvas1.toDataURL('image/png');
-          pdf.addImage(img1, 'PNG', 0, 0, 612, 396);
+          const img1 = canvas1.toDataURL('image/png', 0.8);
+          pdf.addImage(img1, 'PNG', 0, 0, 612, 396, undefined, 'FAST');
         }
 
-        // Process second voucher of the pair
+        // Process second voucher (Bottom)
         if (i + 1 < vouchers.length) {
           const v2 = vouchers[i + 1];
           const el2 = voucherRefs.current[v2.id];
           if (el2) {
             setPdfProgress({ current: i + 2, total: vouchers.length });
             const canvas2 = await html2canvas(el2, { 
-              scale: 4, 
+              scale: 2, 
               useCORS: true, 
               backgroundColor: '#ffffff',
               logging: false,
               width: 816,
               height: 528,
-              windowWidth: 816,
-              windowHeight: 528,
+              scrollX: 0,
+              scrollY: 0,
               onclone: (clonedDoc) => {
                 const el = clonedDoc.getElementById(`voucher-${v2.id}`);
                 if (el) {
-                  el.style.opacity = '1';
+                  el.style.transform = 'none';
+                  el.style.scale = '1';
                   el.style.position = 'relative';
                   el.style.left = '0';
                   el.style.top = '0';
                   el.style.display = 'flex';
                   el.style.visibility = 'visible';
-                  // Force a standard font to prevent overlapping
-                  el.style.fontFamily = 'Arial, sans-serif';
+                  el.style.opacity = '1';
+                  el.style.width = '816px';
+                  el.style.height = '528px';
+                  
+                  const allDivs = el.getElementsByTagName('div');
+                  for (let j = 0; j < allDivs.length; j++) {
+                    (allDivs[j] as HTMLElement).style.transform = 'none';
+                  }
                 }
               }
             });
-            const img2 = canvas2.toDataURL('image/png');
-            pdf.addImage(img2, 'PNG', 0, 396, 612, 396);
+            const img2 = canvas2.toDataURL('image/png', 0.8);
+            pdf.addImage(img2, 'PNG', 0, 396, 612, 396, undefined, 'FAST');
             
             pdf.setLineDashPattern([5, 5], 0);
             pdf.setDrawColor(200, 200, 200);
@@ -472,10 +490,10 @@ export default function App() {
         }
       }
 
-      pdf.save(`Vales_Impresion_${new Date().getTime()}.pdf`);
+      pdf.save(`Vales_Salida_${new Date().toISOString().split('T')[0]}.pdf`);
     } catch (error) {
       console.error("Error generating PDF:", error);
-      alert("Hubo un error al generar el PDF. Por favor intenta de nuevo.");
+      alert("Error al generar PDF. Asegúrate de que los vales estén visibles.");
     } finally {
       setPdfProgress(null);
     }
@@ -539,6 +557,27 @@ export default function App() {
     });
 
     XLSX.writeFile(wb, `Vales_Export_${new Date().getTime()}.xlsx`);
+  };
+
+  const handleRefreshFolios = () => {
+    // Reset counters locally for this operation if needed, 
+    // but usually we want to continue from current global counters
+    const tempCounters = { ...folioCounters };
+    
+    const updatedVouchers = vouchers.map(v => {
+      if (v.header.paquete && v.header.paquete.includes('BIC INF DIAM')) {
+        const lastChar = v.header.paquete.trim().slice(-1).toUpperCase();
+        const counter = tempCounters[lastChar] || 1;
+        const newFolio = `${lastChar}${counter.toString().padStart(2, '0')}`;
+        tempCounters[lastChar] = counter + 1;
+        return { ...v, header: { ...v.header, folio: newFolio } };
+      }
+      return v;
+    });
+    
+    setVouchers(updatedVouchers);
+    setFolioCounters(tempCounters);
+    alert("Folios actualizados secuencialmente por paquete.");
   };
 
   const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -794,6 +833,14 @@ export default function App() {
                 <span>Excel</span>
               </button>
               <button 
+                onClick={handleRefreshFolios}
+                className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                title="Re-asignar folios secuencialmente"
+              >
+                <RefreshCw size={18} />
+                <span>Folios</span>
+              </button>
+              <button 
                 onClick={handleDownloadAllPDF}
                 disabled={isGeneratingPDF}
                 className={cn(
@@ -816,61 +863,25 @@ export default function App() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 pt-6 border-t border-stone-100">
-            {/* Left Sidebar: Plantillas de Conceptos */}
-            <div className="lg:col-span-3 space-y-4">
-              <div className="flex items-center justify-between text-xs font-bold text-stone-400 uppercase tracking-widest mb-2">
-                <span>Plantillas ({filteredTemplates.length})</span>
-                <label className="cursor-pointer text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg transition-colors">
-                  <Upload size={14} /> Importar PDF
-                  <input type="file" accept=".pdf" className="hidden" onChange={handlePdfTemplateUpload} />
-                </label>
-              </div>
-              
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={14} />
-                <input 
-                  type="text" 
-                  placeholder="Buscar..." 
-                  className="w-full pl-8 pr-3 py-2 bg-white border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2 max-h-[800px] overflow-y-auto pr-2 custom-scrollbar">
-                {filteredTemplates.map(t => (
-                  <div key={t.id} className="relative group">
-                    <button
-                      onClick={() => handleTemplateChange(t.id)}
-                      className={cn(
-                        "w-full px-3 py-3 rounded-xl text-left transition-all border-2 flex flex-col gap-1",
-                        activeVoucher.templateId === t.id 
-                          ? "bg-emerald-600 border-emerald-600 text-white shadow-md" 
-                          : "bg-white border-stone-100 text-stone-600 hover:border-stone-200"
-                      )}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 pt-6 border-t border-stone-100">
+            {/* Form Area */}
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest">Detalles del Vale</h3>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-stone-400 uppercase">Plantilla:</label>
+                    <select 
+                      value={activeVoucher.templateId}
+                      onChange={(e) => handleTemplateChange(e.target.value)}
+                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                     >
-                      <div className={cn("text-[8px] uppercase font-bold leading-tight", activeVoucher.templateId === t.id ? "text-emerald-100" : "text-stone-400")}>
-                        {t.concepto}
-                      </div>
-                      <div className="text-[11px] font-bold leading-tight">
-                        {t.subConcepto}
-                      </div>
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleAddVoucher(t); }}
-                      className="absolute top-1/2 -translate-y-1/2 -right-2 bg-emerald-500 text-white rounded-full p-1.5 shadow-md opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                      title="Crear nuevo con esta plantilla"
-                    >
-                      <Plus size={12} />
-                    </button>
+                      {allTemplates.map(t => (
+                        <option key={t.id} value={t.id}>{t.concepto}</option>
+                      ))}
+                    </select>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Main Content: Vales y Editor */}
-            <div className="lg:col-span-9 space-y-6">
+                </div>
               {/* Vales Activos Tabs */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold text-stone-400 uppercase tracking-widest">
@@ -945,7 +956,8 @@ export default function App() {
                         const letter = newPaquete.trim().slice(-1).toUpperCase();
                         newPrototipo = `BIC INF DIAM ${letter}`;
                         
-                        if (newPaquete.includes('BIC INF DIAM')) {
+                        // Only generate new folio if current one is empty or doesn't match the package letter
+                        if (newPaquete.includes('BIC INF DIAM') && (!newFolio || !newFolio.startsWith(letter))) {
                           newFolio = generateFolio(newPaquete);
                         }
                       }
@@ -1060,179 +1072,179 @@ export default function App() {
             </div>
           </div>
         </div>
-        </div>
-
-        {/* Preview Area */}
-        <div className="flex flex-col items-center gap-8">
-          <div className="w-full overflow-x-auto pb-12 flex flex-col items-center gap-12">
-            {/* We render all vouchers but only the active one is "visible" in the UI preview, 
-                however they all need to be in the DOM for html2canvas to work easily during "Download All" */}
-            {vouchers.map((v) => {
-              const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
-              const isActive = v.id === activeVoucherId;
-              
-              return (
-                <div 
-                  key={v.id}
-                  id={`voucher-${v.id}`}
-                  ref={el => voucherRefs.current[v.id] = el}
-                  className={cn(
-                    "bg-white p-6 border border-stone-300 shadow-xl text-[10px] leading-tight text-black origin-top transition-all",
-                    // Half-letter horizontal: 8.5 x 5.5. 
-                    // 8.5" = 816px, 5.5" = 528px
-                    "w-[816px] h-[528px] flex flex-col", 
-                    isActive ? "relative" : "fixed -left-[9999px] top-0 opacity-100" // Move off-screen instead of hiding for html2canvas
-                  )}
-                  style={{ fontFamily: 'Arial, sans-serif' }}
-                >
-                  {/* Header */}
-                  <div className="text-center border-b-2 border-black pb-1 mb-3 relative">
-                    <h2 className="text-sm font-bold">CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.</h2>
-                    <p className="text-[8px] uppercase tracking-widest">HUIMANGUILLO TABASCO</p>
-                    <h3 className="text-[10px] font-bold mt-1 border-y border-black py-0.5">VALE DE SALIDA DE ALMACEN</h3>
-                    <div className="absolute top-0 right-0 text-right">
-                      <div className="flex items-center gap-1">
-                        <span className="font-bold text-[9px]">FOLIO:</span>
-                        <span className="text-red-600 font-bold text-sm min-w-[40px] border-b border-black">{v.header.folio}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-12 gap-x-4 mb-4">
-                    <div className="col-span-8 space-y-1.5">
-                      <div className="flex gap-2">
-                        <span className="font-bold w-16">OBRA:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.obra}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="font-bold w-16">PAQUETE:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.paquete}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="font-bold w-16">FECHA:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.fecha}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <span className="font-bold w-16 text-[8px]">DESTAJISTA:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.destajista}</span>
+        <div className="sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto scrollbar-hide" id="preview-area-container">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-full flex flex-col items-center gap-4">
+              {/* We render all vouchers but only the active one is "visible" in the UI preview, 
+                  however they all need to be in the DOM for html2canvas to work easily during "Download All" */}
+              {vouchers.map((v) => {
+                const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
+                const isActive = v.id === activeVoucherId;
+                
+                return (
+                  <div 
+                    key={v.id}
+                    id={`voucher-${v.id}`}
+                    ref={el => voucherRefs.current[v.id] = el}
+                    className={cn(
+                      "bg-white p-5 border border-stone-300 shadow-xl text-[10px] leading-tight text-black origin-top transition-all",
+                      // Half-letter horizontal: 8.5 x 5.5. 
+                      // 8.5" = 816px, 5.5" = 528px
+                      "w-[816px] h-[528px] flex flex-col", 
+                      isActive ? "relative scale-[0.6] sm:scale-[0.7] md:scale-[0.8] lg:scale-[0.9] xl:scale-[0.75] 2xl:scale-100" : "fixed -left-[9999px] top-0 opacity-100" 
+                    )}
+                    style={{ fontFamily: 'Arial, sans-serif' }}
+                  >
+                    {/* Header */}
+                    <div className="text-center border-b border-stone-300 pb-0.5 mb-1 relative">
+                      <h2 className="text-sm font-bold">CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.</h2>
+                      <p className="text-[7px] uppercase tracking-widest">HUIMANGUILLO TABASCO</p>
+                      <h3 className="text-[9px] font-bold mt-0.5 border-y border-stone-300 py-0.5">VALE DE SALIDA DE ALMACEN</h3>
+                      <div className="absolute top-0 right-0 text-right">
+                        <div className="flex items-center gap-1">
+                          <span className="font-bold text-[8px]">FOLIO:</span>
+                          <span className="text-red-600 font-bold text-sm min-w-[40px] border-b border-stone-300">{v.header.folio}</span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="col-span-4 space-y-1.5">
-                      <div className="flex gap-2">
-                        <span className="font-bold w-20">PROTOTIPO:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.prototipo}</span>
+                    <div className="grid grid-cols-12 gap-x-3 mb-1.5">
+                      <div className="col-span-8 space-y-1">
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-16 text-[9px] pb-0.5">OBRA:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.obra}</span>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-16 text-[9px] pb-0.5">PAQUETE:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.paquete}</span>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-16 text-[9px] pb-0.5">FECHA:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.fecha}</span>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-16 text-[8px] pb-0.5">DESTAJISTA:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.destajista}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <span className="font-bold w-20">UBICACIÓN:</span>
-                        <span className="border-b border-stone-400 flex-1 px-1">{v.header.ubicacion}</span>
-                      </div>
-                      <div className="mt-2 border-2 border-black p-1.5 h-16 flex flex-col">
-                        <span className="font-bold text-[8px] uppercase text-stone-500">CONCEPTO:</span>
-                        <span className="font-bold text-[9px] leading-tight flex-1 overflow-hidden">{v.header.concepto}</span>
+
+                      <div className="col-span-4 space-y-1">
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-20 text-[9px] pb-0.5">PROTOTIPO:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.prototipo}</span>
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <span className="font-bold w-20 text-[9px] pb-0.5">UBICACIÓN:</span>
+                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.ubicacion}</span>
+                        </div>
+                        <div className="mt-1 border border-stone-300 p-1 h-10 flex flex-col">
+                          <span className="font-bold text-[7px] uppercase text-stone-400">CONCEPTO:</span>
+                          <span className="font-bold text-[8px] leading-tight flex-1 overflow-hidden">{v.header.concepto}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                                    {/* Table */}
-                  <div className="flex-1 overflow-hidden">
-                    <table className="w-full border-collapse border-2 border-black mb-2">
-                      <thead>
-                        <tr className="bg-stone-100">
-                          <th className="border border-black px-1 py-1 w-12 text-[8px]">CLASIF.</th>
-                          <th className="border border-black px-1 py-1 w-12 text-[8px]">UNIDAD</th>
-                          <th className="border border-black px-1 py-1 w-16 text-[8px]">CANTIDAD</th>
-                          <th className="border border-black px-1 py-1 text-left text-[8px]">DESCRIPCION</th>
-                          <th className="border border-black px-1 py-1 w-16 text-[8px]">P.U</th>
-                          <th className="border border-black px-1 py-1 w-20 text-[8px]">IMPORTE</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {v.items.map((item, idx) => (
-                          <tr key={idx} className="h-5">
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5 text-center">{item.unidad}</td>
-                            <td className="border border-black px-1 py-0.5 text-center font-bold text-[9px]">{item.cantidad}</td>
-                            <td className="border border-black px-1 py-0.5 uppercase text-[9px] leading-none whitespace-nowrap overflow-hidden">{item.descripcion}</td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
+                                      {/* Table */}
+                    <div className="flex-1 overflow-hidden">
+                      <table className="w-full border-collapse border border-stone-200 mb-1">
+                        <thead>
+                          <tr className="bg-stone-50">
+                            <th className="border border-stone-50 px-1 py-0.5 w-12 text-[8px]">CLASIF.</th>
+                            <th className="border border-stone-50 px-1 py-0.5 w-12 text-[8px]">UNIDAD</th>
+                            <th className="border border-stone-50 px-1 py-0.5 w-16 text-[8px]">CANTIDAD</th>
+                            <th className="border border-stone-50 px-1 py-0.5 text-left text-[8px]">DESCRIPCION</th>
+                            <th className="border border-stone-50 px-1 py-0.5 w-16 text-[8px]">P.U</th>
+                            <th className="border border-stone-50 px-1 py-0.5 w-20 text-[8px]">IMPORTE</th>
                           </tr>
-                        ))}
-                        
-                        {/* Special Note Row */}
-                        {v.header.fueraPresupuesto && (
-                          <tr className="h-5">
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5 text-center font-bold italic">"MATERIAL FUERA DE PRESUPUESTO"</td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
+                        </thead>
+                        <tbody>
+                          {v.items.map((item, idx) => (
+                            <tr key={idx} className="h-4">
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0.5 text-center text-[8px]">{item.unidad}</td>
+                              <td className="border border-stone-50 px-1 py-0.5 text-center font-bold text-[9px]">{item.cantidad}</td>
+                              <td className="border border-stone-50 px-1 py-0.5 uppercase text-[8px] leading-none whitespace-nowrap overflow-hidden">{item.descripcion}</td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                            </tr>
+                          ))}
+                          
+                          {/* Special Note Row */}
+                          {v.header.fueraPresupuesto && (
+                            <tr className="h-4">
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0.5 text-center font-bold italic text-[8px]">"MATERIAL FUERA DE PRESUPUESTO"</td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                            </tr>
+                          )}
+
+                          {/* Empty rows to maintain height - Increased capacity */}
+                          {Array.from({ length: Math.max(0, (v.header.fueraPresupuesto ? 14 : 15) - v.items.length) }).map((_, idx) => (
+                            <tr key={`empty-${idx}`} className="h-4">
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border border-stone-50 px-1 py-0"></td>
+                            </tr>
+                          ))}
+
+                          {/* Bottom Right Note in Table */}
+                          <tr className="h-10">
+                            <td className="border border-stone-50" colSpan={4}></td>
+                            <td className="border border-stone-50" colSpan={2} align="center">
+                              <div className="text-[7px] font-bold uppercase leading-tight px-1 whitespace-pre-wrap">
+                                {template.subConcepto}
+                              </div>
+                            </td>
                           </tr>
-                        )}
-
-                        {/* Empty rows to maintain height */}
-                        {Array.from({ length: Math.max(0, (v.header.fueraPresupuesto ? 7 : 8) - v.items.length) }).map((_, idx) => (
-                          <tr key={`empty-${idx}`} className="h-5">
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                            <td className="border border-black px-1 py-0.5"></td>
-                          </tr>
-                        ))}
-
-                        {/* Bottom Right Note in Table */}
-                        <tr className="h-10">
-                          <td className="border border-black" colSpan={4}></td>
-                          <td className="border border-black" colSpan={2} align="center">
-                            <div className="text-[7px] font-bold uppercase leading-tight px-1">
-                              LECHADA EN PISO<br/>PLANTA BAJA Y ALTA<br/>(4 VIV.)
-                            </div>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Footer / Signatures */}
-                  <div className="grid grid-cols-2 gap-16 px-12 mt-auto">
-                    <div className="text-center">
-                      <div className="h-8 flex items-end justify-center uppercase font-bold text-[9px] mb-1">{v.header.elaboro}</div>
-                      <div className="border-t border-black pt-1 font-bold uppercase text-[8px]">ELABORÓ:</div>
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="text-center">
-                      <div className="h-8 flex items-end justify-center uppercase font-bold text-[9px] mb-1">{v.header.autorizo}</div>
-                      <div className="border-t border-black pt-1 font-bold uppercase text-[8px]">AUTORIZÓ:</div>
+
+                    {/* Footer / Signatures */}
+                    <div className="grid grid-cols-2 gap-12 px-12 mt-1">
+                      <div className="text-center">
+                        <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.elaboro}</div>
+                        <div className="border-t border-stone-300 pt-0.5 font-bold uppercase text-[7px]">ELABORÓ:</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.autorizo}</div>
+                        <div className="border-t border-stone-300 pt-0.5 font-bold uppercase text-[7px]">AUTORIZÓ:</div>
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+            
+            <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm max-w-4xl w-full">
+              <h4 className="text-sm font-bold text-stone-700 mb-3 flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                Modo Media Carta Horizontal (8.5" x 5.5")
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="text-xs text-stone-500 space-y-2">
+                  <p>
+                    El diseño está optimizado para <strong>Media Carta Horizontal</strong>. Al descargar el PDF, se generará una hoja tamaño Carta (8.5" x 11") con dos vales apilados, listos para cortar.
+                  </p>
+                  <ul className="space-y-1 list-disc pl-4">
+                    <li>Cada vale mantiene su propia información de folio y materiales.</li>
+                    <li>La leyenda inferior derecha cambia automáticamente según la plantilla seleccionada.</li>
+                    <li>"Descargar PDF" procesará todos los vales activos (2 por página).</li>
+                  </ul>
                 </div>
-              );
-            })}
-          </div>
-          
-          <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm max-w-4xl w-full">
-            <h4 className="text-sm font-bold text-stone-700 mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-              Modo Media Carta Horizontal (8.5" x 5.5")
-            </h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="text-xs text-stone-500 space-y-2">
-                <p>
-                  El diseño está optimizado para <strong>Media Carta Horizontal</strong>. Al descargar el PDF, se generará una hoja tamaño Carta con dos vales apilados, listos para cortar.
-                </p>
-                <ul className="space-y-1 list-disc pl-4">
-                  <li>Cada vale mantiene su propia información de folio y materiales.</li>
-                  <li>"Descargar PDF" procesará todos los vales activos.</li>
-                </ul>
-              </div>
-              <div className="bg-stone-50 p-3 rounded-xl border border-stone-100 flex items-center gap-4">
-                <div className="bg-white p-2 rounded-lg shadow-sm border border-stone-200">
-                  <FileText size={24} className="text-emerald-600" />
-                </div>
-                <div className="text-[10px] text-stone-400 leading-tight">
-                  <span className="font-bold text-stone-600 block mb-1">TIP DE IMPRESIÓN:</span>
-                  Asegúrate de que la escala de impresión esté al 100% para mantener las dimensiones exactas de la plantilla.
+                <div className="bg-stone-50 p-3 rounded-xl border border-stone-100 flex items-center gap-4">
+                  <div className="bg-white p-2 rounded-lg shadow-sm border border-stone-200">
+                    <FileText size={24} className="text-emerald-600" />
+                  </div>
+                  <div className="text-[10px] text-stone-400 leading-tight">
+                    <span className="font-bold text-stone-600 block mb-1">TIP DE IMPRESIÓN:</span>
+                    Asegúrate de que la escala de impresión esté al 100% para mantener las dimensiones exactas de la plantilla.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1240,5 +1252,7 @@ export default function App() {
         </div>
       </div>
     </div>
+  </div>
+</div>
   );
 }
