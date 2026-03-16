@@ -315,6 +315,24 @@ export default function App() {
     setVouchers(vouchers.map(v => v.id === activeVoucherId ? { ...v, ...updates } : v));
   };
 
+  const updateItem = (index: number, field: keyof VoucherItem, value: string | number) => {
+    const newItems = [...activeVoucher.items];
+    newItems[index] = { ...newItems[index], [field]: value } as VoucherItem;
+    updateActiveVoucher({ items: newItems });
+  };
+
+  const addItem = () => {
+    updateActiveVoucher({ 
+      items: [...activeVoucher.items, { unidad: 'PZA', cantidad: 1, descripcion: '' }] 
+    });
+  };
+
+  const removeItem = (index: number) => {
+    updateActiveVoucher({ 
+      items: activeVoucher.items.filter((_, i) => i !== index) 
+    });
+  };
+
   const handleTemplateChange = (templateId: string) => {
     const template = allTemplates.find(t => t.id === templateId);
     if (template) {
@@ -1068,6 +1086,79 @@ export default function App() {
                     <span className="ml-3 text-sm font-bold text-stone-600 uppercase tracking-tight">Material Fuera de Presupuesto</span>
                   </label>
                 </div>
+
+                {activeVoucher.templateId === 'empty' && (
+                  <div className="md:col-span-3 lg:col-span-4 mt-6 space-y-4">
+                    <div className="flex items-center justify-between border-b border-stone-200 pb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
+                        <h3 className="text-xs font-bold text-stone-600 uppercase tracking-widest">Partidas del Vale</h3>
+                      </div>
+                      <button 
+                        onClick={addItem}
+                        className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all shadow-sm"
+                      >
+                        <Plus size={14} />
+                        Añadir Partida
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2">
+                      {activeVoucher.items.map((item, idx) => (
+                        <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-white p-3 rounded-xl border border-stone-100 shadow-sm group transition-all hover:border-emerald-200">
+                          <div className="col-span-2 space-y-1">
+                            <label className="text-[8px] font-bold text-stone-400 uppercase">Unidad</label>
+                            <input 
+                              type="text" 
+                              value={item.unidad}
+                              onChange={e => updateItem(idx, 'unidad', e.target.value.toUpperCase())}
+                              placeholder="PZA"
+                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                            />
+                          </div>
+                          <div className="col-span-2 space-y-1">
+                            <label className="text-[8px] font-bold text-stone-400 uppercase">Cant.</label>
+                            <input 
+                              type="number" 
+                              value={item.cantidad}
+                              onChange={e => updateItem(idx, 'cantidad', parseFloat(e.target.value) || 0)}
+                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                            />
+                          </div>
+                          <div className="col-span-7 space-y-1">
+                            <label className="text-[8px] font-bold text-stone-400 uppercase">Descripción</label>
+                            <input 
+                              type="text" 
+                              value={item.descripcion}
+                              onChange={e => updateItem(idx, 'descripcion', e.target.value.toUpperCase())}
+                              placeholder="DESCRIPCIÓN DEL MATERIAL..."
+                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                            />
+                          </div>
+                          <div className="col-span-1 flex justify-center pb-1">
+                            <button 
+                              onClick={() => removeItem(idx)}
+                              className="text-stone-300 hover:text-red-500 transition-colors p-1"
+                              title="Eliminar partida"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {activeVoucher.items.length === 0 && (
+                        <div className="text-center py-8 border-2 border-dashed border-stone-200 rounded-2xl bg-stone-50/50">
+                          <p className="text-stone-400 text-[10px] uppercase font-bold mb-2">No hay partidas en este vale</p>
+                          <button 
+                            onClick={addItem}
+                            className="text-emerald-600 hover:text-emerald-700 text-[10px] font-bold uppercase underline underline-offset-4"
+                          >
+                            Haz clic aquí para añadir la primera
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
