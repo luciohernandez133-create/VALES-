@@ -974,18 +974,18 @@ export default function App() {
 
         {/* Main Content Grid */}
         <div className="flex-1 overflow-hidden">
-          <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] h-full w-full items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[500px_1fr] h-full w-full items-start">
             {/* Form Area */}
             <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
               <div className="space-y-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                  <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest">Detalles del Vale</h3>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-bold text-stone-400 uppercase">Selección Rápida:</label>
+                  <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest whitespace-nowrap">Detalles del Vale</h3>
+                  <div className="flex items-center gap-2 flex-1 md:justify-end w-full">
+                    <label className="text-xs font-bold text-stone-400 uppercase whitespace-nowrap">Selección Rápida:</label>
                     <select 
                       value={activeVoucher.templateId}
                       onChange={(e) => handleTemplateChange(e.target.value)}
-                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all min-w-[200px]"
+                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all flex-1 min-w-[200px] max-w-full"
                     >
                       {allTemplates.map(t => (
                         <option key={t.id} value={t.id}>{t.concepto}</option>
