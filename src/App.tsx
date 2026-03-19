@@ -35,38 +35,101 @@ interface VoucherData {
   items: VoucherItem[];
 }
 
+const LOCATION_DATA: Record<string, { mza: number, lotes: number[] }[]> = {
+  'E': [
+    { mza: 98, lotes: Array.from({ length: 14 }, (_, i) => i + 1) },
+    { mza: 99, lotes: Array.from({ length: 14 }, (_, i) => i + 1) },
+  ],
+  'F': [
+    { mza: 100, lotes: Array.from({ length: 14 }, (_, i) => i + 1) },
+    { mza: 101, lotes: Array.from({ length: 5 }, (_, i) => i + 1) },
+    { mza: 102, lotes: Array.from({ length: 6 }, (_, i) => i + 1) },
+  ],
+  'G': [
+    { mza: 102, lotes: Array.from({ length: 4 }, (_, i) => i + 7) },
+    { mza: 93, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 94, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 95, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+  ],
+  'H': [
+    { mza: 88, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 89, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 96, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+  ],
+  'I': [
+    { mza: 90, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 91, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 92, lotes: [1, 2, 3, 4, 5, 9] },
+  ],
+  'K': [
+    { mza: 103, lotes: Array.from({ length: 26 }, (_, i) => i + 1) },
+  ],
+  'O': [
+    { mza: 46, lotes: Array.from({ length: 7 }, (_, i) => i + 3) },
+    { mza: 49, lotes: Array.from({ length: 8 }, (_, i) => i + 1) },
+    { mza: 50, lotes: Array.from({ length: 8 }, (_, i) => i + 1) },
+    { mza: 51, lotes: [1, 2, 3, 4, 10, 11, 12, 13] },
+  ],
+  'P': [
+    { mza: 47, lotes: Array.from({ length: 8 }, (_, i) => i + 1) },
+    { mza: 48, lotes: Array.from({ length: 8 }, (_, i) => i + 1) },
+    { mza: 54, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 55, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 56, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+  ],
+  'Q': [
+    { mza: 52, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 53, lotes: Array.from({ length: 10 }, (_, i) => i + 1) },
+    { mza: 60, lotes: Array.from({ length: 12 }, (_, i) => i + 1) },
+    { mza: 61, lotes: Array.from({ length: 12 }, (_, i) => i + 1) },
+  ]
+};
+
 export default function App() {
-  const [vouchers, setVouchers] = useState<VoucherData[]>([
-    {
-      id: 'initial',
-      templateId: 'cimentacion-acero',
-      header: {
-        obra: 'INFONAVIT BICENTENARIO',
-        prototipo: 'BIC INF DIAM F',
-        paquete: '25 BIC INF DIAM F',
-        fecha: new Date().toLocaleDateString('es-MX'),
-        ubicacion: 'MANZANA 1 LOTE 1',
-        destajista: 'JUAN PEREZ',
-        folio: 'F01',
-        elaboro: 'ING. LUCIO HERNANDEZ',
-        autorizo: 'ARQ. RESIDENTE',
-        concepto: 'INFO-CIMENTACION ARMADO HABILITADO Y COLADO',
-        fueraPresupuesto: false,
-      },
-      items: [
-        { unidad: 'SACO', cantidad: 0.5, descripcion: 'CEMENTO GRIS SACO DE 50 KG' },
-        { unidad: 'LT', cantidad: 8, descripcion: 'ADEBON' },
-        { unidad: 'PZA', cantidad: 0.5, descripcion: 'BROCHA DE CERDA 4 (FUERA DE PPTO)' },
-      ],
-    }
-  ]);
+  const [vouchers, setVouchers] = useState<VoucherData[]>(() => {
+    const saved = localStorage.getItem('vouchers');
+    if (saved) return JSON.parse(saved);
+    return [
+      {
+        id: 'initial',
+        templateId: 'cimentacion-acero',
+        header: {
+          obra: 'INFONAVIT BICENTENARIO',
+          prototipo: 'BIC INF DIAM F',
+          paquete: '25 BIC INF DIAM F',
+          fecha: new Date().toLocaleDateString('es-MX'),
+          ubicacion: 'MANZANA 1 LOTE 1',
+          destajista: 'JUAN PEREZ',
+          folio: 'F01',
+          elaboro: 'ING. LUCIO HERNANDEZ',
+          autorizo: 'ARQ. RESIDENTE',
+          concepto: 'INFO-CIMENTACION ARMADO HABILITADO Y COLADO',
+          fueraPresupuesto: false,
+        },
+        items: [
+          { unidad: 'SACO', cantidad: 0.5, descripcion: 'CEMENTO GRIS SACO DE 50 KG' },
+          { unidad: 'LT', cantidad: 8, descripcion: 'ADEBON' },
+          { unidad: 'PZA', cantidad: 0.5, descripcion: 'BROCHA DE CERDA 4 (FUERA DE PPTO)' },
+        ],
+      }
+    ];
+  });
   
-  const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>([]);
-  const [activeVoucherId, setActiveVoucherId] = useState<string>(vouchers[0].id);
+  const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>(() => {
+    const saved = localStorage.getItem('customTemplates');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [activeVoucherId, setActiveVoucherId] = useState<string>(() => {
+    const saved = localStorage.getItem('activeVoucherId');
+    if (saved && vouchers.some(v => v.id === saved)) return saved;
+    return vouchers[0]?.id || 'initial';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
   const [showFolioConfig, setShowFolioConfig] = useState(false);
   const [showListManager, setShowListManager] = useState(false);
+  const [showPrintInfo, setShowPrintInfo] = useState(false);
   const [editingList, setEditingList] = useState<'destajistas' | 'elaboro' | 'autorizo' | null>(null);
   const [newItemName, setNewItemName] = useState('');
 
@@ -123,6 +186,18 @@ export default function App() {
   });
 
   useEffect(() => {
+    localStorage.setItem('vouchers', JSON.stringify(vouchers));
+  }, [vouchers]);
+
+  useEffect(() => {
+    localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
+  }, [customTemplates]);
+
+  useEffect(() => {
+    localStorage.setItem('activeVoucherId', activeVoucherId);
+  }, [activeVoucherId]);
+
+  useEffect(() => {
     localStorage.setItem('destajistas', JSON.stringify(destajistas));
   }, [destajistas]);
 
@@ -173,6 +248,7 @@ export default function App() {
   const conceptRef = useRef<HTMLTextAreaElement>(null);
 
   const PACKAGES = [
+    "25 BIC INF DIAM E",
     "25 BIC INF DIAM F",
     "25 BIC INF DIAM H",
     "25 BIC INF DIAM I",
@@ -183,6 +259,20 @@ export default function App() {
     "26 BIC INF DIAM Q",
     "26 BIC INF DIAM J"
   ];
+
+  const getLocationsForPackage = (paquete: string) => {
+    const letter = paquete.trim().slice(-1).toUpperCase();
+    const data = LOCATION_DATA[letter];
+    if (!data) return [];
+    
+    const locations: string[] = [];
+    data.forEach(item => {
+      item.lotes.forEach(lote => {
+        locations.push(`MANZANA ${item.mza} LOTE ${lote}`);
+      });
+    });
+    return locations;
+  };
 
   const isGeneratingPDF = pdfProgress !== null;
 
@@ -240,7 +330,7 @@ export default function App() {
       },
       items: [...targetTemplate.items],
     };
-    setVouchers([...vouchers, newVoucher]);
+    setVouchers(prev => [...prev, newVoucher]);
     setActiveVoucherId(newId);
   };
 
@@ -304,15 +394,17 @@ export default function App() {
 
   const handleRemoveVoucher = (id: string) => {
     if (vouchers.length === 1) return;
-    const newVouchers = vouchers.filter(v => v.id !== id);
-    setVouchers(newVouchers);
-    if (activeVoucherId === id) {
-      setActiveVoucherId(newVouchers[0].id);
-    }
+    setVouchers(prev => {
+      const newVouchers = prev.filter(v => v.id !== id);
+      if (activeVoucherId === id) {
+        setActiveVoucherId(newVouchers[0].id);
+      }
+      return newVouchers;
+    });
   };
 
   const updateActiveVoucher = (updates: Partial<VoucherData>) => {
-    setVouchers(vouchers.map(v => v.id === activeVoucherId ? { ...v, ...updates } : v));
+    setVouchers(prev => prev.map(v => v.id === activeVoucherId ? { ...v, ...updates } : v));
   };
 
   const updateItem = (index: number, field: keyof VoucherItem, value: string | number) => {
@@ -582,7 +674,7 @@ export default function App() {
     // but usually we want to continue from current global counters
     const tempCounters = { ...folioCounters };
     
-    const updatedVouchers = vouchers.map(v => {
+    setVouchers(prev => prev.map(v => {
       if (v.header.paquete && v.header.paquete.includes('BIC INF DIAM')) {
         const lastChar = v.header.paquete.trim().slice(-1).toUpperCase();
         const counter = tempCounters[lastChar] || 1;
@@ -591,11 +683,9 @@ export default function App() {
         return { ...v, header: { ...v.header, folio: newFolio } };
       }
       return v;
-    });
+    }));
     
-    setVouchers(updatedVouchers);
     setFolioCounters(tempCounters);
-    alert("Folios actualizados secuencialmente por paquete.");
   };
 
   const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -640,8 +730,8 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-stone-100 p-4 md:p-6 font-sans text-stone-900">
-      <div className="max-w-[1400px] mx-auto flex flex-col gap-6">
+    <div className="h-screen bg-stone-50 font-sans text-stone-900 flex flex-col overflow-hidden">
+      <div className="w-full flex flex-col h-full">
         
         {/* Folio Configuration Modal */}
         {showFolioConfig && (
@@ -787,32 +877,32 @@ export default function App() {
         )}
         
         {/* Top Panel / Controls */}
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-6 space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-emerald-700">
-              <div className="bg-emerald-100 p-2 rounded-xl">
-                <FileText size={28} />
+        <div className="bg-white border-b border-stone-200 p-1.5 md:px-4 space-y-1 w-full flex-shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-emerald-700">
+              <div className="bg-emerald-100 p-1 rounded-lg">
+                <FileText size={20} />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight">Gestor de Vales</h1>
-                <p className="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Construvivenda Tecnológica</p>
+                <h1 className="text-base font-bold tracking-tight leading-none">Gestor de Vales</h1>
+                <p className="text-[8px] font-bold text-stone-400 uppercase tracking-widest">Construvivenda Tecnológica</p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button 
                 onClick={() => setShowListManager(true)}
-                className="p-2 text-stone-500 hover:bg-stone-100 rounded-xl transition-all"
+                className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-lg transition-all"
                 title="Gestión de Listas (Destajistas, etc.)"
               >
-                <FileText size={20} />
+                <FileText size={18} />
               </button>
               <button 
                 onClick={() => setShowFolioConfig(true)}
-                className="p-2 text-stone-500 hover:bg-stone-100 rounded-xl transition-all"
+                className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-lg transition-all"
                 title="Configuración de Folios"
               >
-                <Settings size={20} />
+                <Settings size={18} />
               </button>
               <input 
                 type="file" 
@@ -823,10 +913,10 @@ export default function App() {
               />
               <button 
                 onClick={() => templateInputRef.current?.click()}
-                className="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-emerald-100"
+                className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-emerald-100"
                 title="Subir archivo JSON con nuevas plantillas"
               >
-                <Plus size={18} />
+                <Plus size={16} />
                 <span>Subir Plantillas</span>
               </button>
               <input 
@@ -838,31 +928,31 @@ export default function App() {
               />
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
               >
-                <Upload size={18} />
+                <Upload size={16} />
                 <span>Importar</span>
               </button>
               <button 
                 onClick={handleDownloadExcel}
-                className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
               >
-                <FileSpreadsheet size={18} />
+                <FileSpreadsheet size={16} />
                 <span>Excel</span>
               </button>
               <button 
                 onClick={handleRefreshFolios}
-                className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-600 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
                 title="Re-asignar folios secuencialmente"
               >
-                <RefreshCw size={18} />
+                <RefreshCw size={16} />
                 <span>Folios</span>
               </button>
               <button 
                 onClick={handleDownloadAllPDF}
                 disabled={isGeneratingPDF}
                 className={cn(
-                  "flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-200",
+                  "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1 rounded-lg text-xs font-bold transition-all shadow-lg shadow-emerald-200",
                   isGeneratingPDF && "opacity-70 cursor-not-allowed"
                 )}
               >
@@ -880,19 +970,22 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 pt-6 border-t border-stone-100">
+        {/* Main Content Grid */}
+        <div className="flex-1 overflow-hidden">
+          <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] h-full w-full items-start">
             {/* Form Area */}
-            <div className="space-y-6">
-              <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+            <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
+              <div className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                   <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest">Detalles del Vale</h3>
                   <div className="flex items-center gap-2">
-                    <label className="text-xs font-bold text-stone-400 uppercase">Plantilla:</label>
+                    <label className="text-xs font-bold text-stone-400 uppercase">Selección Rápida:</label>
                     <select 
                       value={activeVoucher.templateId}
                       onChange={(e) => handleTemplateChange(e.target.value)}
-                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all min-w-[200px]"
                     >
                       {allTemplates.map(t => (
                         <option key={t.id} value={t.id}>{t.concepto}</option>
@@ -900,6 +993,7 @@ export default function App() {
                     </select>
                   </div>
                 </div>
+
               {/* Vales Activos Tabs */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold text-stone-400 uppercase tracking-widest">
@@ -936,31 +1030,13 @@ export default function App() {
               </div>
 
               {/* Editor Form */}
-              <div className="bg-stone-50/50 rounded-2xl p-5 border border-stone-100">
+              <div className="bg-stone-50/50 rounded-2xl p-5 border border-stone-100 mt-4">
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
                 <h2 className="text-xs font-bold text-stone-600 uppercase tracking-widest">Datos del Vale Seleccionado</h2>
               </div>
               
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-stone-400 uppercase">Obra</label>
-                  <input 
-                    type="text" 
-                    value={activeVoucher.header.obra}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, obra: e.target.value } })}
-                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-stone-400 uppercase">Prototipo</label>
-                  <input 
-                    type="text" 
-                    value={activeVoucher.header.prototipo}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, prototipo: e.target.value } })}
-                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  />
-                </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Paquete</label>
                   <select 
@@ -985,7 +1061,8 @@ export default function App() {
                           ...activeVoucher.header, 
                           paquete: newPaquete,
                           folio: newFolio,
-                          prototipo: newPrototipo
+                          prototipo: newPrototipo,
+                          ubicacion: '' // Reset location when package changes
                         } 
                       });
                     }}
@@ -999,12 +1076,26 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Ubicación</label>
-                  <input 
-                    type="text" 
-                    value={activeVoucher.header.ubicacion}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value } })}
-                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  />
+                  {getLocationsForPackage(activeVoucher.header.paquete).length > 0 ? (
+                    <select 
+                      value={activeVoucher.header.ubicacion}
+                      onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value } })}
+                      className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                    >
+                      <option value="">Seleccionar Ubicación...</option>
+                      {getLocationsForPackage(activeVoucher.header.paquete).map(loc => (
+                        <option key={loc} value={loc}>{loc}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input 
+                      type="text" 
+                      value={activeVoucher.header.ubicacion}
+                      onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value } })}
+                      className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                      placeholder="Escribir ubicación..."
+                    />
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Fecha</label>
@@ -1104,7 +1195,7 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-1 gap-2">
                       {activeVoucher.items.map((item, idx) => (
-                        <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-white p-3 rounded-xl border border-stone-100 shadow-sm group transition-all hover:border-emerald-200">
+                        <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-stone-50 p-3 rounded-xl border border-stone-100 shadow-sm group transition-all hover:border-emerald-200">
                           <div className="col-span-2 space-y-1">
                             <label className="text-[8px] font-bold text-stone-400 uppercase">Unidad</label>
                             <input 
@@ -1112,7 +1203,7 @@ export default function App() {
                               value={item.unidad}
                               onChange={e => updateItem(idx, 'unidad', e.target.value.toUpperCase())}
                               placeholder="PZA"
-                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                              className="w-full px-2 py-1.5 bg-white border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                             />
                           </div>
                           <div className="col-span-2 space-y-1">
@@ -1121,7 +1212,7 @@ export default function App() {
                               type="number" 
                               value={item.cantidad}
                               onChange={e => updateItem(idx, 'cantidad', parseFloat(e.target.value) || 0)}
-                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                              className="w-full px-2 py-1.5 bg-white border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                             />
                           </div>
                           <div className="col-span-7 space-y-1">
@@ -1131,7 +1222,7 @@ export default function App() {
                               value={item.descripcion}
                               onChange={e => updateItem(idx, 'descripcion', e.target.value.toUpperCase())}
                               placeholder="DESCRIPCIÓN DEL MATERIAL..."
-                              className="w-full px-2 py-1.5 bg-stone-50 border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                              className="w-full px-2 py-1.5 bg-white border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                             />
                           </div>
                           <div className="col-span-1 flex justify-center pb-1">
@@ -1161,31 +1252,78 @@ export default function App() {
                 )}
               </div>
             </div>
-          </div>
-        </div>
-        <div className="sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto scrollbar-hide" id="preview-area-container">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-full flex flex-col items-center gap-4">
-              {/* We render all vouchers but only the active one is "visible" in the UI preview, 
-                  however they all need to be in the DOM for html2canvas to work easily during "Download All" */}
-              {vouchers.map((v) => {
-                const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
-                const isActive = v.id === activeVoucherId;
-                
-                return (
-                  <div 
-                    key={v.id}
-                    id={`voucher-${v.id}`}
-                    ref={el => voucherRefs.current[v.id] = el}
-                    className={cn(
-                      "bg-white p-5 border border-stone-300 shadow-xl text-[10px] leading-tight text-black origin-top transition-all",
-                      // Half-letter horizontal: 8.5 x 5.5. 
-                      // 8.5" = 816px, 5.5" = 528px
-                      "w-[816px] h-[528px] flex flex-col", 
-                      isActive ? "relative scale-[0.6] sm:scale-[0.7] md:scale-[0.8] lg:scale-[0.9] xl:scale-[0.75] 2xl:scale-100" : "fixed -left-[9999px] top-0 opacity-100" 
-                    )}
-                    style={{ fontFamily: 'Arial, sans-serif' }}
+              
+              {/* Print Info Toggle */}
+                <div className="flex justify-center mt-8">
+                  <button 
+                    onClick={() => setShowPrintInfo(!showPrintInfo)}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-stone-200 rounded-full text-[10px] font-bold text-stone-500 uppercase tracking-widest hover:bg-stone-50 transition-all shadow-sm"
                   >
+                    <FileText size={14} className={showPrintInfo ? "text-emerald-500" : ""} />
+                    {showPrintInfo ? "Ocultar Info de Impresión" : "Ver Info de Impresión (Media Carta)"}
+                  </button>
+                </div>
+
+                {showPrintInfo && (
+                  <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm w-full mt-4">
+                    <h4 className="text-sm font-bold text-stone-700 mb-3 flex items-center gap-2">
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
+                      Modo Media Carta Horizontal (8.5" x 5.5")
+                    </h4>
+                    <div className="grid grid-cols-1 gap-6">
+                      <div className="text-xs text-stone-500 space-y-2">
+                        <p>
+                          El diseño está optimizado para <strong>Media Carta Horizontal</strong>. Al descargar el PDF, se generará una hoja tamaño Carta (8.5" x 11") con dos vales apilados, listos para cortar.
+                        </p>
+                        <ul className="space-y-1 list-disc pl-4">
+                          <li>Cada vale mantiene su propia información de folio y materiales.</li>
+                          <li>La leyenda inferior derecha cambia automáticamente según la plantilla seleccionada.</li>
+                          <li>"Descargar PDF" procesará todos los vales activos (2 por página).</li>
+                        </ul>
+                      </div>
+                      <div className="bg-stone-50 p-3 rounded-xl border border-stone-100 flex items-center gap-4">
+                        <div className="bg-white p-2 rounded-lg shadow-sm border border-stone-200">
+                          <FileText size={24} className="text-emerald-600" />
+                        </div>
+                        <div className="text-[10px] text-stone-400 leading-tight">
+                          <span className="font-bold text-stone-600 block mb-1">TIP DE IMPRESIÓN:</span>
+                          Asegúrate de que la escala de impresión esté al 100% para mantener las dimensiones exactas de la plantilla.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Preview (Sticky) */}
+            <div className="p-3 md:p-4 space-y-4 h-full overflow-y-auto scrollbar-hide bg-stone-100">
+              <div className="flex flex-col items-center">
+                <div className="w-full flex items-center justify-between mb-2">
+                  <h3 className="text-[10px] font-bold text-stone-800 uppercase tracking-widest">Vista Previa Real</h3>
+                  <div className="flex items-center gap-1.5 text-[9px] font-bold text-stone-400 uppercase">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    En vivo
+                  </div>
+                </div>
+                
+                <div className="w-full overflow-hidden flex justify-center bg-white rounded-lg p-1 md:p-2 border border-stone-200 shadow-sm" id="preview-area-container">
+                  <div className="relative w-full aspect-[8.5/5.5] max-w-4xl">
+                    {vouchers.map((v) => {
+                      const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
+                      const isActive = v.id === activeVoucherId;
+                      
+                      return (
+                        <div 
+                          key={v.id}
+                          id={`voucher-${v.id}`}
+                          ref={el => voucherRefs.current[v.id] = el}
+                          className={cn(
+                            "bg-white p-3 md:p-5 border border-stone-300 shadow-xl text-[10px] leading-tight text-black transition-all absolute top-0 left-0 w-full h-full flex flex-col",
+                            isActive ? "opacity-100 z-10 scale-100" : "opacity-0 -z-10 pointer-events-none" 
+                          )}
+                          style={{ fontFamily: 'Arial, sans-serif' }}
+                        >
                     {/* Header */}
                     <div className="text-center border-b border-stone-300 pb-0.5 mb-1 relative">
                       <h2 className="text-sm font-bold">CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.</h2>
@@ -1239,54 +1377,54 @@ export default function App() {
                       <table className="w-full border-collapse border border-stone-200 mb-1">
                         <thead>
                           <tr className="bg-stone-50">
-                            <th className="border border-stone-50 px-1 py-0.5 w-12 text-[8px]">CLASIF.</th>
-                            <th className="border border-stone-50 px-1 py-0.5 w-12 text-[8px]">UNIDAD</th>
-                            <th className="border border-stone-50 px-1 py-0.5 w-16 text-[8px]">CANTIDAD</th>
-                            <th className="border border-stone-50 px-1 py-0.5 text-left text-[8px]">DESCRIPCION</th>
-                            <th className="border border-stone-50 px-1 py-0.5 w-16 text-[8px]">P.U</th>
-                            <th className="border border-stone-50 px-1 py-0.5 w-20 text-[8px]">IMPORTE</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 w-12 text-[8px]">CLASIF.</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 w-12 text-[8px]">UNIDAD</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 w-16 text-[8px]">CANTIDAD</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 text-left text-[8px]">DESCRIPCION</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 w-16 text-[8px]">P.U</th>
+                            <th className="border-x border-stone-50 px-1 py-0.5 w-20 text-[8px]">IMPORTE</th>
                           </tr>
                         </thead>
                         <tbody>
                           {v.items.map((item, idx) => (
                             <tr key={idx} className="h-4">
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0.5 text-center text-[8px]">{item.unidad}</td>
-                              <td className="border border-stone-50 px-1 py-0.5 text-center font-bold text-[9px]">{item.cantidad}</td>
-                              <td className="border border-stone-50 px-1 py-0.5 uppercase text-[8px] leading-none whitespace-nowrap overflow-hidden">{item.descripcion}</td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 text-center text-[8px]">{item.unidad}</td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 text-center font-bold text-[9px]">{item.cantidad}</td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 uppercase text-[8px] leading-none whitespace-nowrap overflow-hidden">{item.descripcion}</td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
                             </tr>
                           ))}
                           
                           {/* Special Note Row */}
                           {v.header.fueraPresupuesto && (
                             <tr className="h-4">
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0.5 text-center font-bold italic text-[8px]">"MATERIAL FUERA DE PRESUPUESTO"</td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 text-center font-bold italic text-[8px]">"MATERIAL FUERA DE PRESUPUESTO"</td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
                             </tr>
                           )}
 
                           {/* Empty rows to maintain height - Increased capacity */}
                           {Array.from({ length: Math.max(0, (v.header.fueraPresupuesto ? 14 : 15) - v.items.length) }).map((_, idx) => (
                             <tr key={`empty-${idx}`} className="h-4">
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
-                              <td className="border border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
+                              <td className="border-x border-stone-50 px-1 py-0"></td>
                             </tr>
                           ))}
 
                           {/* Bottom Right Note in Table */}
                           <tr className="h-10">
-                            <td className="border border-stone-50" colSpan={4}></td>
-                            <td className="border border-stone-50" colSpan={2} align="center">
+                            <td className="border-x border-stone-50" colSpan={4}></td>
+                            <td className="border-x border-stone-50" colSpan={2} align="center">
                               <div className="text-[7px] font-bold uppercase leading-tight px-1 whitespace-pre-wrap">
                                 {template.subConcepto}
                               </div>
@@ -1311,39 +1449,12 @@ export default function App() {
                 );
               })}
             </div>
-            
-            <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm max-w-4xl w-full">
-              <h4 className="text-sm font-bold text-stone-700 mb-3 flex items-center gap-2">
-                <span className="w-2 h-2 bg-emerald-500 rounded-full"></span>
-                Modo Media Carta Horizontal (8.5" x 5.5")
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="text-xs text-stone-500 space-y-2">
-                  <p>
-                    El diseño está optimizado para <strong>Media Carta Horizontal</strong>. Al descargar el PDF, se generará una hoja tamaño Carta (8.5" x 11") con dos vales apilados, listos para cortar.
-                  </p>
-                  <ul className="space-y-1 list-disc pl-4">
-                    <li>Cada vale mantiene su propia información de folio y materiales.</li>
-                    <li>La leyenda inferior derecha cambia automáticamente según la plantilla seleccionada.</li>
-                    <li>"Descargar PDF" procesará todos los vales activos (2 por página).</li>
-                  </ul>
-                </div>
-                <div className="bg-stone-50 p-3 rounded-xl border border-stone-100 flex items-center gap-4">
-                  <div className="bg-white p-2 rounded-lg shadow-sm border border-stone-200">
-                    <FileText size={24} className="text-emerald-600" />
-                  </div>
-                  <div className="text-[10px] text-stone-400 leading-tight">
-                    <span className="font-bold text-stone-600 block mb-1">TIP DE IMPRESIÓN:</span>
-                    Asegúrate de que la escala de impresión esté al 100% para mantener las dimensiones exactas de la plantilla.
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 </div>
-  );
+</div>
+);
 }
