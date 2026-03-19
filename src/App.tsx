@@ -1178,21 +1178,20 @@ export default function App() {
                   </label>
                 </div>
 
-                {activeVoucher.templateId === 'empty' && (
-                  <div className="md:col-span-3 lg:col-span-4 mt-6 space-y-4">
-                    <div className="flex items-center justify-between border-b border-stone-200 pb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
-                        <h3 className="text-xs font-bold text-stone-600 uppercase tracking-widest">Partidas del Vale</h3>
-                      </div>
-                      <button 
-                        onClick={addItem}
-                        className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all shadow-sm"
-                      >
-                        <Plus size={14} />
-                        Añadir Partida
-                      </button>
+                <div className="md:col-span-3 lg:col-span-4 mt-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-stone-200 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
+                      <h3 className="text-xs font-bold text-stone-600 uppercase tracking-widest">Partidas del Vale</h3>
                     </div>
+                    <button 
+                      onClick={addItem}
+                      className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all shadow-sm"
+                    >
+                      <Plus size={14} />
+                      Añadir Partida
+                    </button>
+                  </div>
                     <div className="grid grid-cols-1 gap-2">
                       {activeVoucher.items.map((item, idx) => (
                         <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-stone-50 p-3 rounded-xl border border-stone-100 shadow-sm group transition-all hover:border-emerald-200">
@@ -1249,7 +1248,6 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                )}
               </div>
             </div>
               
