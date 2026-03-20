@@ -3,8 +3,11 @@ import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/template
 import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import * as pdfjs from 'pdfjs-dist';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -502,6 +505,7 @@ export default function App() {
     if (isGeneratingPDF || vouchers.length === 0) return;
     
     try {
+      setIsGeneratingPDF(true);
       setPdfProgress({ current: 0, total: vouchers.length });
       
       const pdf = new jsPDF({
@@ -510,92 +514,185 @@ export default function App() {
         format: 'letter'
       });
 
-      for (let i = 0; i < vouchers.length; i += 2) {
-        if (i > 0) {
-          pdf.addPage('letter', 'portrait');
-        }
+      // Group vouchers by package
+      const groupedVouchers: Record<string, typeof vouchers> = {};
+      vouchers.forEach(v => {
+        const pkg = v.header.paquete || 'Sin Paquete';
+        if (!groupedVouchers[pkg]) groupedVouchers[pkg] = [];
+        groupedVouchers[pkg].push(v);
+      });
 
-        // Process first voucher (Top)
-        const v1 = vouchers[i];
-        const el1 = voucherRefs.current[v1.id];
-        if (el1) {
-          setPdfProgress({ current: i + 1, total: vouchers.length });
-          const canvas1 = await html2canvas(el1, { 
-            scale: 2, 
-            useCORS: true, 
-            backgroundColor: '#ffffff',
-            logging: false,
-            width: 816,
-            height: 528,
-            scrollX: 0,
-            scrollY: 0,
-            onclone: (clonedDoc) => {
-              const el = clonedDoc.getElementById(`voucher-${v1.id}`);
-              if (el) {
-                el.style.transform = 'none';
-                el.style.scale = '1';
-                el.style.position = 'relative';
-                el.style.left = '0';
-                el.style.top = '0';
-                el.style.display = 'flex';
-                el.style.visibility = 'visible';
-                el.style.opacity = '1';
-                el.style.width = '816px';
-                el.style.height = '528px';
-                
-                const allDivs = el.getElementsByTagName('div');
-                for (let j = 0; j < allDivs.length; j++) {
-                  (allDivs[j] as HTMLElement).style.transform = 'none';
-                }
-              }
-            }
+      let isFirstPage = true;
+      let processedCount = 0;
+
+      const drawVoucher = (v: typeof vouchers[0], startY: number) => {
+          // Title
+          pdf.setFontSize(12);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.', 306, startY + 20, { align: 'center' });
+          
+          pdf.setFontSize(8);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text('HUIMANGUILLO TABASCO', 306, startY + 32, { align: 'center' });
+          
+          pdf.setFontSize(10);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('VALE DE SALIDA DE ALMACEN', 306, startY + 48, { align: 'center' });
+          
+          // Folio
+          pdf.setFontSize(9);
+          pdf.text('FOLIO:', 480, startY + 48);
+          pdf.setTextColor(255, 0, 0);
+          pdf.text(v.header.folio || '', 520, startY + 48);
+          pdf.setTextColor(0, 0, 0);
+          
+          // Header details
+          pdf.setFontSize(8);
+          pdf.setFont('helvetica', 'bold');
+          
+          // Left column
+          pdf.text('OBRA:', 40, startY + 70);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.obra || '', 80, startY + 70);
+          pdf.line(80, startY + 72, 300, startY + 72);
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('PAQUETE:', 40, startY + 85);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.paquete || '', 90, startY + 85);
+          pdf.line(90, startY + 87, 300, startY + 87);
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('FECHA:', 40, startY + 100);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.fecha || '', 80, startY + 100);
+          pdf.line(80, startY + 102, 300, startY + 102);
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('DESTAJISTA:', 40, startY + 115);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.destajista || '', 100, startY + 115);
+          pdf.line(100, startY + 117, 300, startY + 117);
+          
+          // Right column
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('PROTOTIPO:', 320, startY + 70);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.prototipo || '', 380, startY + 70);
+          pdf.line(380, startY + 72, 570, startY + 72);
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('UBICACIÓN:', 320, startY + 85);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.ubicacion || '', 380, startY + 85);
+          pdf.line(380, startY + 87, 570, startY + 87);
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('CONCEPTO:', 320, startY + 100);
+          pdf.setFont('helvetica', 'normal');
+          const conceptoLines = pdf.splitTextToSize(v.header.concepto || '', 190);
+          pdf.text(conceptoLines, 380, startY + 100);
+          pdf.line(380, startY + 102, 570, startY + 102);
+
+          // Table
+          const tableData = v.items.map(item => [
+            item.clasificacion,
+            item.unidad,
+            item.cantidad,
+            item.descripcion,
+            item.precioUnitario,
+            item.importe
+          ]);
+
+          // Ensure 14 rows
+          while (tableData.length < 14) {
+            tableData.push(['', '', '', '', '', '']);
+          }
+
+          autoTable(pdf, {
+            startY: startY + 130,
+            head: [['CLASIF.', 'UNIDAD', 'CANTIDAD', 'DESCRIPCION', 'P.U', 'IMPORTE']],
+            body: tableData,
+            theme: 'grid',
+            styles: {
+              fontSize: 7,
+              cellPadding: 2,
+              lineColor: [200, 200, 200],
+              lineWidth: 0.5,
+              textColor: [0, 0, 0],
+              font: 'helvetica'
+            },
+            headStyles: {
+              fillColor: [245, 245, 245],
+              textColor: [0, 0, 0],
+              fontStyle: 'bold',
+              halign: 'center'
+            },
+            columnStyles: {
+              0: { cellWidth: 40, halign: 'center' },
+              1: { cellWidth: 40, halign: 'center' },
+              2: { cellWidth: 50, halign: 'center' },
+              3: { cellWidth: 'auto' },
+              4: { cellWidth: 50, halign: 'right' },
+              5: { cellWidth: 60, halign: 'right' }
+            },
+            margin: { left: 40, right: 40 }
           });
-          const img1 = canvas1.toDataURL('image/png', 0.8);
-          pdf.addImage(img1, 'PNG', 0, 0, 612, 396, undefined, 'FAST');
-        }
 
-        // Process second voucher (Bottom)
-        if (i + 1 < vouchers.length) {
-          const v2 = vouchers[i + 1];
-          const el2 = voucherRefs.current[v2.id];
-          if (el2) {
-            setPdfProgress({ current: i + 2, total: vouchers.length });
-            const canvas2 = await html2canvas(el2, { 
-              scale: 2, 
-              useCORS: true, 
-              backgroundColor: '#ffffff',
-              logging: false,
-              width: 816,
-              height: 528,
-              scrollX: 0,
-              scrollY: 0,
-              onclone: (clonedDoc) => {
-                const el = clonedDoc.getElementById(`voucher-${v2.id}`);
-                if (el) {
-                  el.style.transform = 'none';
-                  el.style.scale = '1';
-                  el.style.position = 'relative';
-                  el.style.left = '0';
-                  el.style.top = '0';
-                  el.style.display = 'flex';
-                  el.style.visibility = 'visible';
-                  el.style.opacity = '1';
-                  el.style.width = '816px';
-                  el.style.height = '528px';
-                  
-                  const allDivs = el.getElementsByTagName('div');
-                  for (let j = 0; j < allDivs.length; j++) {
-                    (allDivs[j] as HTMLElement).style.transform = 'none';
-                  }
-                }
-              }
-            });
-            const img2 = canvas2.toDataURL('image/png', 0.8);
-            pdf.addImage(img2, 'PNG', 0, 396, 612, 396, undefined, 'FAST');
+          const finalY = (pdf as any).lastAutoTable.finalY;
+
+          // Signatures
+          pdf.setFontSize(8);
+          pdf.setFont('helvetica', 'bold');
+          
+          const sigY = finalY + 30;
+          
+          pdf.text('ELABORO', 130, sigY, { align: 'center' });
+          pdf.line(60, sigY + 20, 200, sigY + 20);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.elaboro || '', 130, sigY + 30, { align: 'center' });
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('RECIBE', 306, sigY, { align: 'center' });
+          pdf.line(236, sigY + 20, 376, sigY + 20);
+          
+          pdf.text('AUTORIZO', 482, sigY, { align: 'center' });
+          pdf.line(412, sigY + 20, 552, sigY + 20);
+          pdf.setFont('helvetica', 'normal');
+          pdf.text(v.header.autorizo || '', 482, sigY + 30, { align: 'center' });
+
+          if (v.header.fueraPresupuesto) {
+            pdf.setFontSize(10);
+            pdf.setFont('helvetica', 'bold');
+            pdf.setTextColor(255, 0, 0);
+            pdf.text('MATERIAL FUERA DE PRESUPUESTO', 306, sigY + 45, { align: 'center' });
+            pdf.setTextColor(0, 0, 0);
+          }
+        };
+
+      for (const [pkg, pkgVouchers] of Object.entries(groupedVouchers)) {
+        for (let i = 0; i < pkgVouchers.length; i += 2) {
+          if (!isFirstPage) {
+            pdf.addPage('letter', 'portrait');
+          }
+          isFirstPage = false;
+
+          // Process first voucher (Top)
+          processedCount++;
+          setPdfProgress({ current: processedCount, total: vouchers.length });
+          drawVoucher(pkgVouchers[i], 0);
+
+          // Process second voucher (Bottom)
+          if (i + 1 < pkgVouchers.length) {
+            processedCount++;
+            setPdfProgress({ current: processedCount, total: vouchers.length });
+            drawVoucher(pkgVouchers[i + 1], 396);
             
+            // Draw dashed line between vouchers
             pdf.setLineDashPattern([5, 5], 0);
             pdf.setDrawColor(200, 200, 200);
             pdf.line(0, 396, 612, 396);
+            pdf.setLineDashPattern([], 0); // Reset dash
           }
         }
       }
@@ -605,68 +702,282 @@ export default function App() {
       console.error("Error generating PDF:", error);
       alert("Error al generar PDF. Asegúrate de que los vales estén visibles.");
     } finally {
+      setIsGeneratingPDF(false);
       setPdfProgress(null);
     }
   };
 
-  const handleDownloadExcel = () => {
-    const wb = XLSX.utils.book_new();
-
-    vouchers.forEach((v, idx) => {
-      // Create a more structured data array for Excel
-      const data = [
-        ['CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.'],
-        ['HUIMANGUILLO TABASCO'],
-        ['VALE DE SALIDA DE ALMACEN', '', '', '', '', 'FOLIO:', v.header.folio],
-        [],
-        ['OBRA:', v.header.obra, '', 'PROTOTIPO:', v.header.prototipo, '', 'CONCEPTO:', v.header.concepto],
-        ['PAQUETE:', v.header.paquete, '', 'UBICACIÓN:', v.header.ubicacion],
-        ['FECHA:', v.header.fecha],
-        ['DESTAJISTA:', v.header.destajista],
-        [],
-        ['CLASIF.', 'UNIDAD', 'CANTIDAD', 'DESCRIPCION', 'P.U', 'IMPORTE'],
-      ];
-
-      v.items.forEach(item => {
-        data.push(['', item.unidad, item.cantidad, item.descripcion, '', '']);
-      });
-
-      // Fill empty rows to maintain format (total 15 rows for items)
-      const currentItemsCount = v.items.length;
-      const targetItemsCount = 15;
-      for (let i = currentItemsCount; i < targetItemsCount; i++) {
-        data.push(['', '', '', '', '', '']);
+  const handleDownloadExcel = async () => {
+    const workbook = new ExcelJS.Workbook();
+    
+    // Group vouchers by package
+    const groupedVouchers: Record<string, typeof vouchers> = {};
+    vouchers.forEach(v => {
+      const pkg = v.header.paquete || 'Sin Paquete';
+      if (!groupedVouchers[pkg]) {
+        groupedVouchers[pkg] = [];
       }
-
-      if (v.header.fueraPresupuesto) {
-        data.push(['', '', '', '"MATERIAL FUERA DE PRESUPUESTO"']);
-      }
-      data.push([]);
-      data.push(['ELABORÓ:', v.header.elaboro, '', '', 'AUTORIZÓ:', v.header.autorizo]);
-
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      
-      // Merge cells for headers
-      ws['!merges'] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } }, // Title
-        { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } }, // Location
-        { s: { r: 2, c: 0 }, e: { r: 2, c: 4 } }, // Vale Title
-      ];
-
-      // Column widths
-      ws['!cols'] = [
-        { wch: 10 }, // CLASIF
-        { wch: 10 }, // UNIDAD
-        { wch: 12 }, // CANTIDAD
-        { wch: 60 }, // DESCRIPCION
-        { wch: 10 }, // P.U
-        { wch: 12 }  // IMPORTE
-      ];
-
-      XLSX.utils.book_append_sheet(wb, ws, `Vale ${idx + 1}`);
+      groupedVouchers[pkg].push(v);
     });
 
-    XLSX.writeFile(wb, `Vales_Export_${new Date().getTime()}.xlsx`);
+    for (const [pkgName, pkgVouchers] of Object.entries(groupedVouchers)) {
+      // Create a valid sheet name (max 31 chars, no invalid chars)
+      const sheetName = pkgName.replace(/[\\/?*[\]]/g, '').substring(0, 31);
+      const worksheet = workbook.addWorksheet(sheetName);
+
+      // Set column widths
+      worksheet.columns = [
+        { width: 8 },  // A: CLASIF
+        { width: 10 }, // B: UNIDAD
+        { width: 10 }, // C: CANTIDAD
+        { width: 15 }, // D: DESCRIPCION 1
+        { width: 15 }, // E: DESCRIPCION 2
+        { width: 15 }, // F: DESCRIPCION 3
+        { width: 15 }, // G: DESCRIPCION 4
+        { width: 15 }, // H: DESCRIPCION 5
+        { width: 12 }, // I: P.U
+        { width: 12 }, // J: IMPORTE
+      ];
+
+      let currentRow = 1;
+      const borderThin = { style: 'thin' as const };
+
+      pkgVouchers.forEach((v, idx) => {
+        const startRow = currentRow;
+
+        // Row 1: Title
+        worksheet.mergeCells(`A${startRow}:J${startRow}`);
+        const titleCell = worksheet.getCell(`A${startRow}`);
+        titleCell.value = 'CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.';
+        titleCell.font = { bold: true, size: 12 };
+        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        titleCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        
+        // Row 2: Location
+        worksheet.mergeCells(`A${startRow + 1}:J${startRow + 1}`);
+        const locCell = worksheet.getCell(`A${startRow + 1}`);
+        locCell.value = 'HUIMANGUILLO TABASCO';
+        locCell.font = { size: 10 };
+        locCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        locCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+
+        // Row 3: Vale Title & Folio
+        worksheet.mergeCells(`A${startRow + 2}:H${startRow + 2}`);
+        const valeTitleCell = worksheet.getCell(`A${startRow + 2}`);
+        valeTitleCell.value = 'VALE DE SALIDA DE ALMACEN';
+        valeTitleCell.font = { bold: true, size: 11 };
+        valeTitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        valeTitleCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        
+        const folioLabelCell = worksheet.getCell(`I${startRow + 2}`);
+        folioLabelCell.value = 'FOLIO:';
+        folioLabelCell.font = { bold: true, size: 10 };
+        folioLabelCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        folioLabelCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        
+        const folioValueCell = worksheet.getCell(`J${startRow + 2}`);
+        folioValueCell.value = v.header.folio;
+        folioValueCell.font = { bold: true, size: 11, color: { argb: 'FFFF0000' } }; // Red text
+        folioValueCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        folioValueCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+
+        // Row 4: Obra, Prototipo
+        const obraLabel = worksheet.getCell(`B${startRow + 3}`);
+        obraLabel.value = 'OBRA:';
+        obraLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        obraLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`C${startRow + 3}:D${startRow + 3}`);
+        const obraValue = worksheet.getCell(`C${startRow + 3}`);
+        obraValue.value = v.header.obra;
+        obraValue.font = { name: 'Calibri', size: 11 };
+        obraValue.border = { bottom: borderThin };
+        
+        const protoLabel = worksheet.getCell(`E${startRow + 3}`);
+        protoLabel.value = 'PROTOTIPO:';
+        protoLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        protoLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`F${startRow + 3}:G${startRow + 3}`);
+        const protoValue = worksheet.getCell(`F${startRow + 3}`);
+        protoValue.value = v.header.prototipo;
+        protoValue.font = { name: 'Calibri', size: 11 };
+        protoValue.border = { bottom: borderThin };
+
+        // Row 5: Paquete, Concepto
+        const paqLabel = worksheet.getCell(`B${startRow + 4}`);
+        paqLabel.value = 'PAQUETE:';
+        paqLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        paqLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`C${startRow + 4}:D${startRow + 4}`);
+        const paqValue = worksheet.getCell(`C${startRow + 4}`);
+        paqValue.value = v.header.paquete;
+        paqValue.font = { name: 'Calibri', size: 11 };
+        paqValue.border = { bottom: borderThin };
+
+        const conceptoLabel = worksheet.getCell(`H${startRow + 4}`);
+        conceptoLabel.value = 'CONCEPTO:';
+        conceptoLabel.font = { bold: true, size: 10 };
+        conceptoLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        worksheet.mergeCells(`I${startRow + 3}:J${startRow + 6}`);
+        const conceptoValue = worksheet.getCell(`I${startRow + 3}`);
+        conceptoValue.value = v.header.concepto;
+        conceptoValue.font = { size: 10 };
+        conceptoValue.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        conceptoValue.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+
+        // Row 6: Fecha, Ubicación
+        const fechaLabel = worksheet.getCell(`B${startRow + 5}`);
+        fechaLabel.value = 'FECHA:';
+        fechaLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        fechaLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`C${startRow + 5}:D${startRow + 5}`);
+        const fechaValue = worksheet.getCell(`C${startRow + 5}`);
+        fechaValue.value = v.header.fecha;
+        fechaValue.font = { name: 'Calibri', size: 11 };
+        fechaValue.border = { bottom: borderThin };
+
+        const ubiLabel = worksheet.getCell(`E${startRow + 5}`);
+        ubiLabel.value = 'UBICACIÓN:';
+        ubiLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        ubiLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`F${startRow + 5}:G${startRow + 5}`);
+        const ubiValue = worksheet.getCell(`F${startRow + 5}`);
+        ubiValue.value = v.header.ubicacion;
+        ubiValue.font = { name: 'Calibri', size: 11 };
+        ubiValue.alignment = { horizontal: 'center', vertical: 'middle' };
+        ubiValue.border = { bottom: borderThin };
+
+        // Row 7: Destajista
+        const destLabel = worksheet.getCell(`B${startRow + 6}`);
+        destLabel.value = 'DESTAJISTA:';
+        destLabel.font = { name: 'Calibri', bold: true, size: 11 };
+        destLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+        
+        worksheet.mergeCells(`C${startRow + 6}:G${startRow + 6}`);
+        const destValue = worksheet.getCell(`C${startRow + 6}`);
+        destValue.value = v.header.destajista;
+        destValue.font = { name: 'Calibri', size: 11 };
+        destValue.border = { bottom: borderThin };
+
+        // Outer borders for the header section A4:H7
+        for (let r = startRow + 3; r <= startRow + 6; r++) {
+          worksheet.getCell(`A${r}`).border = { left: borderThin };
+          worksheet.getCell(`H${r}`).border = { right: borderThin };
+        }
+        worksheet.getCell(`A${startRow + 6}`).border = { left: borderThin, bottom: borderThin };
+        for (let c = 2; c <= 8; c++) {
+          const col = String.fromCharCode(64 + c);
+          const cell = worksheet.getCell(`${col}${startRow + 6}`);
+          cell.border = { ...cell.border, bottom: borderThin };
+        }
+
+        // Row 8: Table Headers
+        const headers = ['CLASIF.', 'UNIDAD', 'CANTIDAD', 'DESCRIPCION', 'P.U', 'IMPORTE'];
+        const headerCols = ['A', 'B', 'C', 'D', 'I', 'J'];
+        worksheet.mergeCells(`D${startRow + 7}:H${startRow + 7}`);
+        
+        headers.forEach((h, i) => {
+          const cell = worksheet.getCell(`${headerCols[i]}${startRow + 7}`);
+          cell.value = h;
+          cell.font = { bold: true, size: 10 };
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        });
+
+        // Apply grid borders to headers
+        for (let c = 1; c <= 10; c++) {
+          const col = String.fromCharCode(64 + c);
+          worksheet.getCell(`${col}${startRow + 7}`).border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        }
+
+        // Items
+        let itemRow = startRow + 8;
+        const targetItemsCount = 16;
+        for (let i = 0; i < targetItemsCount; i++) {
+          worksheet.mergeCells(`D${itemRow}:H${itemRow}`);
+          
+          if (i < v.items.length) {
+            const item = v.items[i];
+            worksheet.getCell(`B${itemRow}`).value = item.unidad;
+            worksheet.getCell(`B${itemRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+            
+            worksheet.getCell(`C${itemRow}`).value = item.cantidad;
+            worksheet.getCell(`C${itemRow}`).alignment = { horizontal: 'center', vertical: 'middle' };
+            
+            worksheet.getCell(`D${itemRow}`).value = item.descripcion;
+            worksheet.getCell(`D${itemRow}`).alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+          
+          // Apply grid borders to item row
+          for (let c = 1; c <= 10; c++) {
+            const col = String.fromCharCode(64 + c);
+            worksheet.getCell(`${col}${itemRow}`).border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+          }
+          
+          itemRow++;
+        }
+
+        // Subconcepto
+        const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
+        const subRow = itemRow - 2;
+        worksheet.mergeCells(`I${subRow}:J${subRow + 1}`);
+        const subConceptoCell = worksheet.getCell(`I${subRow}`);
+        subConceptoCell.value = template.subConcepto;
+        subConceptoCell.font = { bold: true, size: 10 };
+        subConceptoCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        subConceptoCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        subConceptoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+
+        // Signatures
+        const sigRow = itemRow;
+        worksheet.mergeCells(`B${sigRow}:D${sigRow}`);
+        const elabLabel = worksheet.getCell(`B${sigRow}`);
+        elabLabel.value = 'ELABORÓ:';
+        elabLabel.font = { size: 10 };
+        elabLabel.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        worksheet.mergeCells(`G${sigRow}:I${sigRow}`);
+        const autLabel = worksheet.getCell(`G${sigRow}`);
+        autLabel.value = 'AUTORIZÓ:';
+        autLabel.font = { size: 10 };
+        autLabel.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        worksheet.mergeCells(`B${sigRow + 2}:D${sigRow + 2}`);
+        const elabValue = worksheet.getCell(`B${sigRow + 2}`);
+        elabValue.value = v.header.elaboro;
+        elabValue.font = { size: 10 };
+        elabValue.alignment = { horizontal: 'center', vertical: 'middle' };
+        elabValue.border = { top: borderThin };
+
+        worksheet.mergeCells(`G${sigRow + 2}:I${sigRow + 2}`);
+        const autValue = worksheet.getCell(`G${sigRow + 2}`);
+        autValue.value = v.header.autorizo;
+        autValue.font = { size: 10 };
+        autValue.alignment = { horizontal: 'center', vertical: 'middle' };
+        autValue.border = { top: borderThin };
+
+        // Add outer borders for the signature section
+        for (let r = itemRow + 1; r <= sigRow + 2; r++) {
+          worksheet.getCell(`A${r}`).border = { left: borderThin };
+          worksheet.getCell(`J${r}`).border = { right: borderThin };
+        }
+        for (let c = 1; c <= 10; c++) {
+          const col = String.fromCharCode(64 + c);
+          const cell = worksheet.getCell(`${col}${sigRow + 2}`);
+          cell.border = { ...cell.border, bottom: borderThin };
+        }
+
+        // Add some spacing before the next voucher
+        currentRow = sigRow + 4;
+      });
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), `Vales_Export_${new Date().getTime()}.xlsx`);
   };
 
   const handleRefreshFolios = () => {
@@ -974,7 +1285,7 @@ export default function App() {
 
         {/* Main Content Grid */}
         <div className="flex-1 overflow-hidden">
-          <div className="grid grid-cols-1 xl:grid-cols-[500px_1fr] h-full w-full items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[600px_1fr] h-full w-full items-start">
             {/* Form Area */}
             <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
               <div className="space-y-4">
@@ -1193,6 +1504,11 @@ export default function App() {
                     </button>
                   </div>
                     <div className="grid grid-cols-1 gap-2">
+                      <datalist id="material-descriptions">
+                        {Array.from(new Set(allTemplates.flatMap(t => t.items.map(i => i.descripcion)))).sort().map((desc, idx) => (
+                          <option key={idx} value={desc} />
+                        ))}
+                      </datalist>
                       {activeVoucher.items.map((item, idx) => (
                         <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-stone-50 p-3 rounded-xl border border-stone-100 shadow-sm group transition-all hover:border-emerald-200">
                           <div className="col-span-2 space-y-1">
@@ -1221,6 +1537,7 @@ export default function App() {
                               value={item.descripcion}
                               onChange={e => updateItem(idx, 'descripcion', e.target.value.toUpperCase())}
                               placeholder="DESCRIPCIÓN DEL MATERIAL..."
+                              list="material-descriptions"
                               className="w-full px-2 py-1.5 bg-white border border-stone-100 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
                             />
                           </div>
