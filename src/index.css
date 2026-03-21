@@ -37,4 +37,18 @@
   --color-white: #ffffff;
   --color-black: #000000;
   --color-transparent: transparent;
+
+  /* ==========================================
+     PALETA DE COLORES (EDITABLE)
+     ========================================== */
+  
+  /* Colores del Menú Lateral (Sidebar) */
+  --color-sidebar-bg: #11101D;          /* Fondo oscuro del menú */
+  --color-sidebar-hover: #1d1b31;       /* Color al pasar el mouse */
+  --color-sidebar-active: #ffffff;      /* Fondo del botón activo */
+  --color-sidebar-text: #ffffff;        /* Color del texto normal */
+  --color-sidebar-text-active: #11101D; /* Color del texto activo */
+  
+  /* Colores de la Aplicación */
+  --color-app-bg: #f3f4f6;              /* Fondo general de la app */
 }

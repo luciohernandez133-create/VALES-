@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/templates';
-import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw } from 'lucide-react';
+import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -15,6 +15,14 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pd
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+interface AppUser {
+  id: string;
+  name: string;
+  username: string;
+  role: 'Administrador' | 'Capturista';
+  createdAt: string;
 }
 
 interface VoucherHeader {
@@ -128,12 +136,32 @@ export default function App() {
     if (saved && vouchers.some(v => v.id === saved)) return saved;
     return vouchers[0]?.id || 'initial';
   });
+  const [activeTab, setActiveTab] = useState<'inicio' | 'captura' | 'reportes' | 'configuracion' | 'usuarios'>('inicio');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // User Management State
+  const [appUsers, setAppUsers] = useState<AppUser[]>(() => {
+    const saved = localStorage.getItem('app_users');
+    return saved ? JSON.parse(saved) : [
+      { id: '1', name: 'Administrador Principal', username: 'admin', role: 'Administrador', createdAt: new Date().toISOString() }
+    ];
+  });
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [newUser, setNewUser] = useState<Partial<AppUser>>({ role: 'Capturista', name: '', username: '' });
+
+  const [filters, setFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    destajista: '',
+    concepto: '',
+    material: '',
+    paquete: ''
+  });
   const [searchTerm, setSearchTerm] = useState('');
-  const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
-  const [showFolioConfig, setShowFolioConfig] = useState(false);
   const [showListManager, setShowListManager] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
   const [showPrintInfo, setShowPrintInfo] = useState(false);
-  const [editingList, setEditingList] = useState<'destajistas' | 'elaboro' | 'autorizo' | null>(null);
+  const [editingList, setEditingList] = useState<'destajistas' | 'elaboro' | 'autorizo'>('destajistas');
   const [newItemName, setNewItemName] = useState('');
 
   const [destajistas, setDestajistas] = useState<string[]>(() => {
@@ -201,6 +229,10 @@ export default function App() {
   }, [activeVoucherId]);
 
   useEffect(() => {
+    localStorage.setItem('app_users', JSON.stringify(appUsers));
+  }, [appUsers]);
+
+  useEffect(() => {
     localStorage.setItem('destajistas', JSON.stringify(destajistas));
   }, [destajistas]);
 
@@ -236,16 +268,7 @@ export default function App() {
       setAutorizoList(autorizoList.filter((_, i) => i !== index));
     }
   };
-  const [folioCounters, setFolioCounters] = useState<{ [key: string]: number }>(() => {
-    const saved = localStorage.getItem('folioCounters');
-    return saved ? JSON.parse(saved) : {
-      'F': 1, 'H': 1, 'I': 1, 'P': 1, 'O': 1, 'G': 1, 'K': 1, 'Q': 1, 'J': 1
-    };
-  });
 
-  useEffect(() => {
-    localStorage.setItem('folioCounters', JSON.stringify(folioCounters));
-  }, [folioCounters]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
   const conceptRef = useRef<HTMLTextAreaElement>(null);
@@ -289,20 +312,6 @@ export default function App() {
     }
   }, [activeVoucher.header.concepto]);
 
-  const generateFolio = (paquete: string) => {
-    const lastChar = paquete.trim().slice(-1).toUpperCase();
-    const counter = folioCounters[lastChar] || 1;
-    const folio = `${lastChar}${counter.toString().padStart(2, '0')}`;
-    
-    // Update counter for next time
-    setFolioCounters(prev => ({
-      ...prev,
-      [lastChar]: counter + 1
-    }));
-    
-    return folio;
-  };
-
   const handleAddVoucher = (template?: VoucherTemplate) => {
     const newId = crypto.randomUUID();
     const targetTemplate = template || allTemplates[0];
@@ -313,10 +322,6 @@ export default function App() {
     if (targetTemplate.subConcepto && targetTemplate.subConcepto !== 'NUEVO VALE EDITABLE') {
       const letter = targetTemplate.subConcepto.trim().slice(-1).toUpperCase();
       initialPrototipo = `BIC INF DIAM ${letter}`;
-      
-      if (targetTemplate.subConcepto.includes('BIC INF DIAM')) {
-        initialFolio = generateFolio(targetTemplate.subConcepto);
-      }
     }
 
     const newVoucher: VoucherData = {
@@ -501,12 +506,38 @@ export default function App() {
     }
   };
 
-  const handleDownloadAllPDF = async () => {
-    if (isGeneratingPDF || vouchers.length === 0) return;
+  const parseDate = (dateStr: string) => {
+    if (!dateStr) return null;
+    if (dateStr.includes('-')) return new Date(dateStr + 'T00:00:00');
+    const parts = dateStr.split('/');
+    if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    return null;
+  };
+
+  const filteredVouchers = useMemo(() => {
+    return vouchers.filter(v => {
+      let match = true;
+      if (filters.destajista && v.header.destajista !== filters.destajista) match = false;
+      if (filters.paquete && v.header.paquete !== filters.paquete) match = false;
+      if (filters.concepto && !v.header.concepto.toLowerCase().includes(filters.concepto.toLowerCase())) match = false;
+      if (filters.material && !v.items.some(i => i.descripcion.toLowerCase().includes(filters.material.toLowerCase()))) match = false;
+      
+      if (filters.dateFrom || filters.dateTo) {
+        const vDate = parseDate(v.header.fecha);
+        if (vDate) {
+          if (filters.dateFrom && vDate < new Date(filters.dateFrom + 'T00:00:00')) match = false;
+          if (filters.dateTo && vDate > new Date(filters.dateTo + 'T23:59:59')) match = false;
+        }
+      }
+      return match;
+    });
+  }, [vouchers, filters]);
+
+  const handleDownloadAllPDF = async (vouchersToExport: VoucherData[] = vouchers) => {
+    if (isGeneratingPDF || vouchersToExport.length === 0) return;
     
     try {
-      setIsGeneratingPDF(true);
-      setPdfProgress({ current: 0, total: vouchers.length });
+      setPdfProgress({ current: 0, total: vouchersToExport.length });
       
       const pdf = new jsPDF({
         orientation: 'portrait',
@@ -515,11 +546,20 @@ export default function App() {
       });
 
       // Group vouchers by package
-      const groupedVouchers: Record<string, typeof vouchers> = {};
-      vouchers.forEach(v => {
+      const groupedVouchers: Record<string, typeof vouchersToExport> = {};
+      vouchersToExport.forEach(v => {
         const pkg = v.header.paquete || 'Sin Paquete';
         if (!groupedVouchers[pkg]) groupedVouchers[pkg] = [];
         groupedVouchers[pkg].push(v);
+      });
+
+      // Sort vouchers within each package by autorizo
+      Object.keys(groupedVouchers).forEach(pkg => {
+        groupedVouchers[pkg].sort((a, b) => {
+          const autA = a.header.autorizo || '';
+          const autB = b.header.autorizo || '';
+          return autA.localeCompare(autB);
+        });
       });
 
       let isFirstPage = true;
@@ -679,13 +719,13 @@ export default function App() {
 
           // Process first voucher (Top)
           processedCount++;
-          setPdfProgress({ current: processedCount, total: vouchers.length });
+          setPdfProgress({ current: processedCount, total: vouchersToExport.length });
           drawVoucher(pkgVouchers[i], 0);
 
           // Process second voucher (Bottom)
           if (i + 1 < pkgVouchers.length) {
             processedCount++;
-            setPdfProgress({ current: processedCount, total: vouchers.length });
+            setPdfProgress({ current: processedCount, total: vouchersToExport.length });
             drawVoucher(pkgVouchers[i + 1], 396);
             
             // Draw dashed line between vouchers
@@ -702,22 +742,31 @@ export default function App() {
       console.error("Error generating PDF:", error);
       alert("Error al generar PDF. Asegúrate de que los vales estén visibles.");
     } finally {
-      setIsGeneratingPDF(false);
       setPdfProgress(null);
     }
   };
 
-  const handleDownloadExcel = async () => {
+  const handleDownloadExcel = async (vouchersToExport: VoucherData[] = vouchers) => {
+    if (vouchersToExport.length === 0) return;
     const workbook = new ExcelJS.Workbook();
     
     // Group vouchers by package
-    const groupedVouchers: Record<string, typeof vouchers> = {};
-    vouchers.forEach(v => {
+    const groupedVouchers: Record<string, typeof vouchersToExport> = {};
+    vouchersToExport.forEach(v => {
       const pkg = v.header.paquete || 'Sin Paquete';
       if (!groupedVouchers[pkg]) {
         groupedVouchers[pkg] = [];
       }
       groupedVouchers[pkg].push(v);
+    });
+
+    // Sort vouchers within each package by autorizo
+    Object.keys(groupedVouchers).forEach(pkg => {
+      groupedVouchers[pkg].sort((a, b) => {
+        const autA = a.header.autorizo || '';
+        const autB = b.header.autorizo || '';
+        return autA.localeCompare(autB);
+      });
     });
 
     for (const [pkgName, pkgVouchers] of Object.entries(groupedVouchers)) {
@@ -727,14 +776,14 @@ export default function App() {
 
       // Set column widths
       worksheet.columns = [
-        { width: 8 },  // A: CLASIF
-        { width: 10 }, // B: UNIDAD
-        { width: 10 }, // C: CANTIDAD
-        { width: 15 }, // D: DESCRIPCION 1
-        { width: 15 }, // E: DESCRIPCION 2
-        { width: 15 }, // F: DESCRIPCION 3
-        { width: 15 }, // G: DESCRIPCION 4
-        { width: 15 }, // H: DESCRIPCION 5
+        { width: 12 }, // A: CLASIF
+        { width: 12 }, // B: UNIDAD
+        { width: 12 }, // C: CANTIDAD
+        { width: 12 }, // D: DESCRIPCION 1
+        { width: 12 }, // E: DESCRIPCION 2
+        { width: 12 }, // F: DESCRIPCION 3
+        { width: 12 }, // G: DESCRIPCION 4
+        { width: 12 }, // H: DESCRIPCION 5
         { width: 12 }, // I: P.U
         { width: 12 }, // J: IMPORTE
       ];
@@ -762,12 +811,16 @@ export default function App() {
         locCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
 
         // Row 3: Vale Title & Folio
-        worksheet.mergeCells(`A${startRow + 2}:H${startRow + 2}`);
-        const valeTitleCell = worksheet.getCell(`A${startRow + 2}`);
+        worksheet.mergeCells(`D${startRow + 2}:G${startRow + 2}`);
+        const valeTitleCell = worksheet.getCell(`D${startRow + 2}`);
         valeTitleCell.value = 'VALE DE SALIDA DE ALMACEN';
         valeTitleCell.font = { bold: true, size: 11 };
         valeTitleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        valeTitleCell.border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        
+        // Apply borders to A-H for row 3
+        ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].forEach(col => {
+          worksheet.getCell(`${col}${startRow + 2}`).border = { top: borderThin, left: borderThin, right: borderThin, bottom: borderThin };
+        });
         
         const folioLabelCell = worksheet.getCell(`I${startRow + 2}`);
         folioLabelCell.value = 'FOLIO:';
@@ -980,25 +1033,6 @@ export default function App() {
     saveAs(new Blob([buffer]), `Vales_Export_${new Date().getTime()}.xlsx`);
   };
 
-  const handleRefreshFolios = () => {
-    // Reset counters locally for this operation if needed, 
-    // but usually we want to continue from current global counters
-    const tempCounters = { ...folioCounters };
-    
-    setVouchers(prev => prev.map(v => {
-      if (v.header.paquete && v.header.paquete.includes('BIC INF DIAM')) {
-        const lastChar = v.header.paquete.trim().slice(-1).toUpperCase();
-        const counter = tempCounters[lastChar] || 1;
-        const newFolio = `${lastChar}${counter.toString().padStart(2, '0')}`;
-        tempCounters[lastChar] = counter + 1;
-        return { ...v, header: { ...v.header, folio: newFolio } };
-      }
-      return v;
-    }));
-    
-    setFolioCounters(tempCounters);
-  };
-
   const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1040,54 +1074,282 @@ export default function App() {
     t.subConcepto.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const isDuplicateVoucher = useMemo(() => {
+    if (!activeVoucher.header.paquete || !activeVoucher.header.ubicacion || !activeVoucher.templateId) return false;
+    
+    return vouchers.some(v => 
+      v.id !== activeVoucher.id && 
+      v.header.paquete === activeVoucher.header.paquete && 
+      v.header.ubicacion === activeVoucher.header.ubicacion && 
+      v.templateId === activeVoucher.templateId
+    );
+  }, [activeVoucher.header.paquete, activeVoucher.header.ubicacion, activeVoucher.templateId, activeVoucher.id, vouchers]);
+
   return (
-    <div className="h-screen bg-stone-50 font-sans text-stone-900 flex flex-col overflow-hidden">
-      <div className="w-full flex flex-col h-full">
-        
-        {/* Folio Configuration Modal */}
-        {showFolioConfig && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-              <div className="p-6 border-b border-stone-100 flex items-center justify-between bg-stone-50">
-                <div className="flex items-center gap-2 text-stone-700">
-                  <Settings size={20} className="text-emerald-600" />
-                  <h2 className="font-bold">Configuración de Folios</h2>
-                </div>
-                <button onClick={() => setShowFolioConfig(false)} className="text-stone-400 hover:text-stone-600 transition-all">
-                  <Plus size={24} className="rotate-45" />
-                </button>
-              </div>
-              <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
-                <p className="text-xs text-stone-500 mb-4">
-                  Ajusta el número de inicio para cada letra de paquete. Los folios se generan como <span className="font-mono font-bold">[LETRA][NÚMERO]</span>.
-                </p>
-                <div className="grid grid-cols-2 gap-4">
-                  {Object.entries(folioCounters).sort().map(([letter, count]) => (
-                    <div key={letter} className="space-y-1">
-                      <label className="text-[10px] font-bold text-stone-400 uppercase">Paquete {letter}</label>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono text-stone-400">{letter}</span>
-                        <input 
-                          type="number" 
-                          value={count}
-                          onChange={(e) => setFolioCounters(prev => ({ ...prev, [letter]: parseInt(e.target.value) || 1 }))}
-                          className="w-full px-3 py-1.5 bg-stone-50 border border-stone-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                          min="1"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="p-6 bg-stone-50 border-t border-stone-100 flex justify-end">
-                <button 
-                  onClick={() => setShowFolioConfig(false)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-xl text-sm font-bold transition-all"
-                >
-                  Guardar Cambios
-                </button>
-              </div>
+    <div className="h-screen bg-[var(--color-app-bg)] font-sans text-stone-900 flex overflow-hidden">
+      {/* Sidebar */}
+      {activeTab !== 'inicio' && (
+        <div className={cn(
+          "flex flex-col bg-[var(--color-sidebar-bg)] text-[var(--color-sidebar-text)] transition-all duration-300 z-20 shadow-xl shrink-0",
+          isSidebarOpen ? "w-64" : "w-20"
+        )}>
+          {/* Sidebar Header */}
+        <div className="h-20 flex items-center justify-between px-4 border-b border-white/10 shrink-0">
+          <div 
+            className={cn("flex items-center gap-3 overflow-hidden transition-all duration-300 cursor-pointer hover:opacity-80", !isSidebarOpen && "w-0 opacity-0")}
+            onClick={() => setActiveTab('inicio')}
+          >
+            <div className="bg-emerald-600 p-2 rounded-lg shadow-lg shrink-0">
+              <img src="https://i.imgur.com/3q1q3Q1.png" alt="Logo" className="w-6 h-6 object-contain filter brightness-0 invert" />
             </div>
+            <div className="flex flex-col">
+              <span className="font-bold tracking-tight whitespace-nowrap text-sm">ConstruVivienda</span>
+              <span className="text-[10px] opacity-60 uppercase tracking-widest whitespace-nowrap">Sistema de Vales</span>
+            </div>
+          </div>
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-2 rounded-lg hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)] transition-colors shrink-0"
+          >
+            <Menu size={20} />
+          </button>
+        </div>
+
+        {/* Sidebar Links */}
+        <div className="flex-1 py-6 px-3 space-y-2 overflow-y-auto scrollbar-hide">
+          <button 
+            onClick={() => setActiveTab('inicio')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+              activeTab === 'inicio' 
+                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+            )}
+          >
+            <Home size={20} className="shrink-0" />
+            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Inicio</span>
+            {!isSidebarOpen && (
+              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                Inicio
+              </div>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('captura')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+              activeTab === 'captura' 
+                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+            )}
+          >
+            <LayoutDashboard size={20} className="shrink-0" />
+            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Captura de Vales</span>
+            {!isSidebarOpen && (
+              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                Captura de Vales
+              </div>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('configuracion')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+              activeTab === 'configuracion' 
+                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+            )}
+          >
+            <Settings size={20} className="shrink-0" />
+            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Ajustes y Plantillas</span>
+            {!isSidebarOpen && (
+              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                Ajustes y Plantillas
+              </div>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => setActiveTab('reportes')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+              activeTab === 'reportes' 
+                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+            )}
+          >
+            <FileText size={20} className="shrink-0" />
+            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Reportes y Búsqueda</span>
+            {!isSidebarOpen && (
+              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                Reportes y Búsqueda
+              </div>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('usuarios')}
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+              activeTab === 'usuarios' 
+                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+            )}
+          >
+            <Users size={20} className="shrink-0" />
+            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Usuarios</span>
+            {!isSidebarOpen && (
+              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                Usuarios
+              </div>
+            )}
+          </button>
+        </div>
+        
+        {/* User Area */}
+        <div className="p-4 border-t border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold shrink-0">
+              CV
+            </div>
+            <div className={cn("flex flex-col overflow-hidden transition-all duration-300", !isSidebarOpen && "w-0 opacity-0")}>
+              <span className="text-sm font-bold whitespace-nowrap">Administrador</span>
+              <span className="text-[10px] opacity-60 whitespace-nowrap">Sistema de Vales</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        
+        {/* Inicio Tab */}
+        {activeTab === 'inicio' && (
+          <div className="flex-1 overflow-y-auto bg-stone-900 relative">
+             {/* Background Image with Overlay */}
+             <div className="absolute inset-0 z-0">
+               <img src="https://images.unsplash.com/photo-1541888086425-d81bb19240f5?auto=format&fit=crop&q=80&w=2000" alt="Background" className="w-full h-full object-cover opacity-40" />
+               <div className="absolute inset-0 bg-gradient-to-t from-stone-900 via-stone-900/60 to-transparent"></div>
+               <div className="absolute inset-0 bg-gradient-to-r from-stone-900/80 via-transparent to-stone-900/80"></div>
+             </div>
+
+             <div className="relative z-10 p-6 md:p-10 h-full flex flex-col max-w-[1600px] mx-auto">
+                {/* Header */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+                   <div>
+                     <h2 className="text-emerald-500 font-bold tracking-[0.2em] text-sm md:text-base mb-1">SISTEMA DE VALES</h2>
+                     <h1 className="text-5xl md:text-7xl font-black text-white tracking-tighter" style={{ fontFamily: 'Impact, sans-serif', textShadow: '4px 4px 0 #000' }}>
+                       CONSTRU<span className="text-emerald-500">VIVIENDA</span>
+                     </h1>
+                   </div>
+                   
+                   {/* Profile / Quick Stats */}
+                   <div className="flex items-center gap-4 bg-black/40 backdrop-blur-md border border-white/10 p-3 rounded-xl">
+                      <div className="w-12 h-12 bg-emerald-600 rounded-lg flex items-center justify-center text-xl font-black text-white border-2 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                        AD
+                      </div>
+                      <div>
+                        <h3 className="text-white font-bold uppercase tracking-wider text-sm">Administrador</h3>
+                        <p className="text-emerald-400 text-xs font-bold tracking-widest">NIVEL: ADMINISTRATIVO</p>
+                      </div>
+                   </div>
+                </div>
+
+                {/* Main Grid Layout */}
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-8 items-center">
+                  
+                  {/* Left Column - Acceso Rápido */}
+                  <div className="space-y-6">
+                    <h3 className="text-white font-black text-xl md:text-2xl tracking-widest uppercase" style={{ textShadow: '2px 2px 0 #000' }}>
+                      Acceso Rápido
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Captura Card */}
+                      <button 
+                        onClick={() => setActiveTab('captura')}
+                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                      >
+                        <img src="https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&q=80&w=800" alt="Captura" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                        <div className="absolute top-0 left-0 w-full bg-emerald-600/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3">
+                          Principal
+                        </div>
+                        <div className="absolute bottom-0 left-0 w-full p-4">
+                          <LayoutDashboard className="text-emerald-400 mb-2" size={32} />
+                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Captura de Vales</h4>
+                          <p className="text-stone-300 text-xs mt-1">Crear y registrar nuevos vales</p>
+                        </div>
+                      </button>
+
+                      {/* Reportes Card */}
+                      <button 
+                        onClick={() => setActiveTab('reportes')}
+                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                      >
+                        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=800" alt="Reportes" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                        <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
+                          Consulta
+                        </div>
+                        <div className="absolute bottom-0 left-0 w-full p-4">
+                          <FileText className="text-emerald-400 mb-2" size={32} />
+                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Reportes</h4>
+                          <p className="text-stone-300 text-xs mt-1">Búsqueda y exportación</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Center Spacer for Background Character/Focus */}
+                  <div className="hidden lg:block w-32 xl:w-64"></div>
+
+                  {/* Right Column - Gestión */}
+                  <div className="space-y-6">
+                    <h3 className="text-white font-black text-xl md:text-2xl tracking-widest uppercase text-right" style={{ textShadow: '2px 2px 0 #000' }}>
+                      Gestión y Configuración
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Ajustes Card */}
+                      <button 
+                        onClick={() => setActiveTab('configuracion')}
+                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                      >
+                        <img src="https://images.unsplash.com/photo-1581092160562-40aa08e78837?auto=format&fit=crop&q=80&w=800" alt="Ajustes" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                        <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
+                          Sistema
+                        </div>
+                        <div className="absolute bottom-0 left-0 w-full p-4">
+                          <Settings className="text-emerald-400 mb-2" size={32} />
+                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Ajustes</h4>
+                          <p className="text-stone-300 text-xs mt-1">Plantillas y catálogos</p>
+                        </div>
+                      </button>
+
+                      {/* Usuarios Card */}
+                      <button 
+                        onClick={() => setActiveTab('usuarios')}
+                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                      >
+                        <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" alt="Usuarios" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                        <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
+                          Administración
+                        </div>
+                        <div className="absolute bottom-0 left-0 w-full p-4">
+                          <Users className="text-emerald-400 mb-2" size={32} />
+                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Usuarios</h4>
+                          <p className="text-stone-300 text-xs mt-1">Control de acceso</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+             </div>
           </div>
         )}
 
@@ -1187,105 +1449,10 @@ export default function App() {
           </div>
         )}
         
-        {/* Top Panel / Controls */}
-        <div className="bg-white border-b border-stone-200 p-1.5 md:px-4 space-y-1 w-full flex-shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-emerald-700">
-              <div className="bg-emerald-100 p-1 rounded-lg">
-                <FileText size={20} />
-              </div>
-              <div>
-                <h1 className="text-base font-bold tracking-tight leading-none">Gestor de Vales</h1>
-                <p className="text-[8px] font-bold text-stone-400 uppercase tracking-widest">Construvivenda Tecnológica</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button 
-                onClick={() => setShowListManager(true)}
-                className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-lg transition-all"
-                title="Gestión de Listas (Destajistas, etc.)"
-              >
-                <FileText size={18} />
-              </button>
-              <button 
-                onClick={() => setShowFolioConfig(true)}
-                className="p-1.5 text-stone-500 hover:bg-stone-100 rounded-lg transition-all"
-                title="Configuración de Folios"
-              >
-                <Settings size={18} />
-              </button>
-              <input 
-                type="file" 
-                ref={templateInputRef} 
-                onChange={handleTemplateUpload} 
-                className="hidden" 
-                accept=".json"
-              />
-              <button 
-                onClick={() => templateInputRef.current?.click()}
-                className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-emerald-100"
-                title="Subir archivo JSON con nuevas plantillas"
-              >
-                <Plus size={16} />
-                <span>Subir Plantillas</span>
-              </button>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileUpload} 
-                className="hidden" 
-                accept=".xlsx, .xls, .csv"
-              />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
-              >
-                <Upload size={16} />
-                <span>Importar</span>
-              </button>
-              <button 
-                onClick={handleDownloadExcel}
-                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
-              >
-                <FileSpreadsheet size={16} />
-                <span>Excel</span>
-              </button>
-              <button 
-                onClick={handleRefreshFolios}
-                className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-600 px-3 py-1 rounded-lg text-xs font-bold transition-all"
-                title="Re-asignar folios secuencialmente"
-              >
-                <RefreshCw size={16} />
-                <span>Folios</span>
-              </button>
-              <button 
-                onClick={handleDownloadAllPDF}
-                disabled={isGeneratingPDF}
-                className={cn(
-                  "flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1 rounded-lg text-xs font-bold transition-all shadow-lg shadow-emerald-200",
-                  isGeneratingPDF && "opacity-70 cursor-not-allowed"
-                )}
-              >
-                {isGeneratingPDF ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Procesando {pdfProgress?.current}/{pdfProgress?.total}...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download size={18} />
-                    <span>Descargar PDF</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Main Content Grid */}
-        <div className="flex-1 overflow-hidden">
-          <div className="grid grid-cols-1 xl:grid-cols-[600px_1fr] h-full w-full items-start">
+        {activeTab === 'captura' && (
+          <div className="flex-1 overflow-hidden">
+            <div className="grid grid-cols-1 xl:grid-cols-[600px_1fr] h-full w-full items-start">
             {/* Form Area */}
             <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
               <div className="space-y-4">
@@ -1354,24 +1521,17 @@ export default function App() {
                     value={activeVoucher.header.paquete}
                     onChange={e => {
                       const newPaquete = e.target.value;
-                      let newFolio = activeVoucher.header.folio;
                       let newPrototipo = activeVoucher.header.prototipo;
 
                       if (newPaquete) {
                         const letter = newPaquete.trim().slice(-1).toUpperCase();
                         newPrototipo = `BIC INF DIAM ${letter}`;
-                        
-                        // Only generate new folio if current one is empty or doesn't match the package letter
-                        if (newPaquete.includes('BIC INF DIAM') && (!newFolio || !newFolio.startsWith(letter))) {
-                          newFolio = generateFolio(newPaquete);
-                        }
                       }
 
                       updateActiveVoucher({ 
                         header: { 
                           ...activeVoucher.header, 
                           paquete: newPaquete,
-                          folio: newFolio,
                           prototipo: newPrototipo,
                           ubicacion: '' // Reset location when package changes
                         } 
@@ -1407,6 +1567,14 @@ export default function App() {
                       placeholder="Escribir ubicación..."
                     />
                   )}
+                  {isDuplicateVoucher && (
+                    <div className="flex items-start gap-1.5 mt-1 text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                      <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                      <span className="text-[10px] font-medium leading-tight">
+                        Ya existe un vale con este paquete, ubicación y concepto.
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Fecha</label>
@@ -1423,7 +1591,7 @@ export default function App() {
                     type="text" 
                     value={activeVoucher.header.folio}
                     onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, folio: e.target.value } })}
-                    placeholder="Auto-generado"
+                    placeholder="Ingresar folio..."
                     className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-black text-emerald-700 focus:ring-2 focus:ring-emerald-500 outline-none transition-all shadow-inner"
                   />
                 </div>
@@ -1769,7 +1937,429 @@ export default function App() {
       </div>
     </div>
   </div>
-</div>
-</div>
-);
+)}
+
+  {/* Configuraciones Tab */}
+        {activeTab === 'configuracion' && (
+          <div className="flex-1 overflow-y-auto p-6 bg-stone-50">
+            <div className="max-w-4xl mx-auto space-y-8">
+              <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-6">
+                <h2 className="text-lg font-bold text-stone-800 mb-4 flex items-center gap-2">
+                  <ListChecks className="text-emerald-600" />
+                  Gestión de Listas
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <button 
+                    onClick={() => { setEditingList('destajistas'); setShowListManager(true); }}
+                    className="p-4 rounded-xl border-2 border-stone-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all text-left"
+                  >
+                    <div className="font-bold text-stone-700">Destajistas</div>
+                    <div className="text-xs text-stone-500 mt-1">{destajistas.length} registrados</div>
+                  </button>
+                  <button 
+                    onClick={() => { setEditingList('elaboro'); setShowListManager(true); }}
+                    className="p-4 rounded-xl border-2 border-stone-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all text-left"
+                  >
+                    <div className="font-bold text-stone-700">Elaboró</div>
+                    <div className="text-xs text-stone-500 mt-1">{elaboroList.length} registrados</div>
+                  </button>
+                  <button 
+                    onClick={() => { setEditingList('autorizo'); setShowListManager(true); }}
+                    className="p-4 rounded-xl border-2 border-stone-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all text-left"
+                  >
+                    <div className="font-bold text-stone-700">Autorizó</div>
+                    <div className="text-xs text-stone-500 mt-1">{autorizoList.length} registrados</div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-6">
+                <h2 className="text-lg font-bold text-stone-800 mb-4 flex items-center gap-2">
+                  <FileText className="text-emerald-600" />
+                  Plantillas y Datos
+                </h2>
+                <div className="flex flex-wrap gap-4">
+                  <input 
+                    type="file" 
+                    ref={templateInputRef} 
+                    onChange={handleTemplateUpload} 
+                    className="hidden" 
+                    accept=".json"
+                  />
+                  <button 
+                    onClick={() => templateInputRef.current?.click()}
+                    className="flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-emerald-200"
+                  >
+                    <Upload size={18} />
+                    Subir Plantillas JSON
+                  </button>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileUpload} 
+                    className="hidden" 
+                    accept=".xlsx, .xls, .csv"
+                  />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-700 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-stone-200"
+                  >
+                    <FileSpreadsheet size={18} />
+                    Importar Datos Excel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Vista de Vales Tab */}
+        {activeTab === 'reportes' && (
+          <div className="flex-1 overflow-hidden flex flex-col bg-stone-50">
+            <div className="p-4 md:p-6 border-b border-stone-200 bg-white shrink-0">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
+                    <Filter className="text-emerald-600" />
+                    Filtros de Búsqueda
+                  </h2>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        const today = new Date().toISOString().split('T')[0];
+                        setFilters(f => ({ ...f, dateFrom: today, dateTo: today }));
+                      }}
+                      className="text-[10px] font-bold uppercase px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-full transition-colors"
+                    >
+                      Hoy
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const today = new Date();
+                        const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
+                        const lastDay = new Date(today.setDate(today.getDate() - today.getDay() + 6));
+                        setFilters(f => ({ 
+                          ...f, 
+                          dateFrom: firstDay.toISOString().split('T')[0], 
+                          dateTo: lastDay.toISOString().split('T')[0] 
+                        }));
+                      }}
+                      className="text-[10px] font-bold uppercase px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-full transition-colors"
+                    >
+                      Esta Semana
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const today = new Date();
+                        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+                        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                        setFilters(f => ({ 
+                          ...f, 
+                          dateFrom: firstDay.toISOString().split('T')[0], 
+                          dateTo: lastDay.toISOString().split('T')[0] 
+                        }));
+                      }}
+                      className="text-[10px] font-bold uppercase px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-full transition-colors"
+                    >
+                      Este Mes
+                    </button>
+                    <button 
+                      onClick={() => setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }))}
+                      className="text-[10px] font-bold uppercase px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-full transition-colors"
+                    >
+                      Todas las Fechas
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => handleDownloadExcel(filteredVouchers)}
+                    className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 text-stone-700 px-4 py-2 rounded-xl text-sm font-bold transition-all border border-stone-200"
+                  >
+                    <FileSpreadsheet size={18} />
+                    Exportar Excel
+                  </button>
+                  <button 
+                    onClick={() => handleDownloadAllPDF(filteredVouchers)}
+                    disabled={isGeneratingPDF || filteredVouchers.length === 0}
+                    className={cn(
+                      "flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-md",
+                      (isGeneratingPDF || filteredVouchers.length === 0) && "opacity-70 cursor-not-allowed"
+                    )}
+                  >
+                    {isGeneratingPDF ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Procesando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={18} />
+                        <span>Descargar PDF</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Fecha Inicio</label>
+                  <input 
+                    type="date" 
+                    value={filters.dateFrom}
+                    onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Fecha Fin</label>
+                  <input 
+                    type="date" 
+                    value={filters.dateTo}
+                    onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Destajista</label>
+                  <input 
+                    type="text" 
+                    value={filters.destajista}
+                    onChange={e => setFilters(f => ({ ...f, destajista: e.target.value }))}
+                    placeholder="Buscar destajista..."
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Concepto</label>
+                  <input 
+                    type="text" 
+                    value={filters.concepto}
+                    onChange={e => setFilters(f => ({ ...f, concepto: e.target.value }))}
+                    placeholder="Buscar concepto..."
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Material</label>
+                  <input 
+                    type="text" 
+                    value={filters.material}
+                    onChange={e => setFilters(f => ({ ...f, material: e.target.value }))}
+                    placeholder="Buscar material..."
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Paquete</label>
+                  <select 
+                    value={filters.paquete}
+                    onChange={e => setFilters(f => ({ ...f, paquete: e.target.value }))}
+                    className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Todos los paquetes</option>
+                    {PACKAGES.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-stone-50 border-b border-stone-200 text-stone-500 font-bold uppercase text-xs">
+                      <tr>
+                        <th className="px-4 py-3">Folio</th>
+                        <th className="px-4 py-3">Fecha</th>
+                        <th className="px-4 py-3">Destajista</th>
+                        <th className="px-4 py-3">Paquete</th>
+                        <th className="px-4 py-3">Ubicación</th>
+                        <th className="px-4 py-3">Concepto</th>
+                        <th className="px-4 py-3 text-right">Partidas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {filteredVouchers.length > 0 ? (
+                        filteredVouchers.map(v => {
+                          const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
+                          return (
+                            <tr key={v.id} className="hover:bg-stone-50 transition-colors">
+                              <td className="px-4 py-3 font-mono font-bold">{v.header.folio || '-'}</td>
+                              <td className="px-4 py-3">{v.header.fecha}</td>
+                              <td className="px-4 py-3">{v.header.destajista}</td>
+                              <td className="px-4 py-3">{v.header.paquete}</td>
+                              <td className="px-4 py-3">{v.header.ubicacion}</td>
+                              <td className="px-4 py-3">{template.concepto}</td>
+                              <td className="px-4 py-3 text-right font-bold">{v.items.length}</td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-8 text-center text-stone-500">
+                            No se encontraron vales que coincidan con los filtros.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="mt-4 text-sm text-stone-500 font-bold text-right">
+                Total de vales mostrados: {filteredVouchers.length}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Usuarios Tab */}
+        {activeTab === 'usuarios' && (
+          <div className="flex-1 overflow-hidden flex flex-col bg-stone-50">
+            <div className="p-4 md:p-6 border-b border-stone-200 bg-white shrink-0 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
+                <Users className="text-emerald-600" />
+                Gestión de Usuarios
+              </h2>
+              <button 
+                onClick={() => setShowUserModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-md"
+              >
+                <UserPlus size={18} />
+                Nuevo Usuario
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 md:p-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-stone-50 border-b border-stone-200 text-stone-500 text-xs uppercase tracking-wider">
+                        <th className="px-6 py-4 font-bold">Nombre</th>
+                        <th className="px-6 py-4 font-bold">Usuario</th>
+                        <th className="px-6 py-4 font-bold">Rol</th>
+                        <th className="px-6 py-4 font-bold">Fecha Creación</th>
+                        <th className="px-6 py-4 font-bold text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {appUsers.map(user => (
+                        <tr key={user.id} className="hover:bg-stone-50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-stone-800">{user.name}</td>
+                          <td className="px-6 py-4 text-stone-600">{user.username}</td>
+                          <td className="px-6 py-4">
+                            <span className={cn(
+                              "px-3 py-1 rounded-full text-xs font-bold",
+                              user.role === 'Administrador' ? "bg-purple-100 text-purple-700" : "bg-emerald-100 text-emerald-700"
+                            )}>
+                              {user.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-stone-500 text-sm">{new Date(user.createdAt).toLocaleDateString()}</td>
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={() => setAppUsers(users => users.filter(u => u.id !== user.id))}
+                              className={cn(
+                                "text-stone-400 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50",
+                                user.username === 'admin' && "opacity-50 cursor-not-allowed hover:text-stone-400 hover:bg-transparent"
+                              )}
+                              disabled={user.username === 'admin'}
+                              title={user.username === 'admin' ? "No se puede eliminar al administrador principal" : "Eliminar usuario"}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User Modal */}
+        {showUserModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+              <div className="p-6 bg-emerald-600 text-white flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <UserPlus size={24} />
+                  <h2 className="text-xl font-bold">Nuevo Usuario</h2>
+                </div>
+                <button onClick={() => setShowUserModal(false)} className="hover:bg-white/20 p-2 rounded-full transition-all">
+                  <Plus className="rotate-45" size={24} />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Nombre Completo</label>
+                  <input 
+                    type="text" 
+                    value={newUser.name}
+                    onChange={e => setNewUser(u => ({ ...u, name: e.target.value }))}
+                    placeholder="Ej. Juan Pérez"
+                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  />
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Nombre de Usuario</label>
+                  <input 
+                    type="text" 
+                    value={newUser.username}
+                    onChange={e => setNewUser(u => ({ ...u, username: e.target.value }))}
+                    placeholder="Ej. jperez"
+                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Rol</label>
+                  <select 
+                    value={newUser.role}
+                    onChange={e => setNewUser(u => ({ ...u, role: e.target.value as 'Administrador' | 'Capturista' }))}
+                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  >
+                    <option value="Capturista">Capturista</option>
+                    <option value="Administrador">Administrador</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="p-6 bg-stone-50 border-t border-stone-100 flex justify-end gap-3">
+                <button 
+                  onClick={() => setShowUserModal(false)}
+                  className="px-6 py-2 rounded-xl text-sm font-bold text-stone-600 hover:bg-stone-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => {
+                    if (newUser.name && newUser.username) {
+                      setAppUsers(users => [...users, {
+                        id: Date.now().toString(),
+                        name: newUser.name!,
+                        username: newUser.username!,
+                        role: newUser.role as 'Administrador' | 'Capturista',
+                        createdAt: new Date().toISOString()
+                      }]);
+                      setShowUserModal(false);
+                      setNewUser({ role: 'Capturista', name: '', username: '' });
+                    }
+                  }}
+                  disabled={!newUser.name || !newUser.username}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-md"
+                >
+                  Crear Usuario
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
