@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/templates';
-import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus } from 'lucide-react';
+import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus, LogOut } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -21,6 +21,7 @@ interface AppUser {
   id: string;
   name: string;
   username: string;
+  password?: string;
   role: 'Administrador' | 'Capturista';
   createdAt: string;
 }
@@ -142,12 +143,32 @@ export default function App() {
   // User Management State
   const [appUsers, setAppUsers] = useState<AppUser[]>(() => {
     const saved = localStorage.getItem('app_users');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Administrador Principal', username: 'admin', role: 'Administrador', createdAt: new Date().toISOString() }
+    const parsedUsers = saved ? JSON.parse(saved) : [];
+    
+    // Ensure admin exists and has a password
+    const adminExists = parsedUsers.find((u: AppUser) => u.username === 'admin');
+    if (!adminExists) {
+      parsedUsers.push({ id: '1', name: 'Administrador Principal', username: 'admin', password: '123', role: 'Administrador', createdAt: new Date().toISOString() });
+    } else if (!adminExists.password) {
+      adminExists.password = '123'; // Default password for existing admin
+    }
+    
+    return parsedUsers.length > 0 ? parsedUsers : [
+      { id: '1', name: 'Administrador Principal', username: 'admin', password: '123', role: 'Administrador', createdAt: new Date().toISOString() }
     ];
   });
+  
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    const saved = localStorage.getItem('current_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   const [showUserModal, setShowUserModal] = useState(false);
-  const [newUser, setNewUser] = useState<Partial<AppUser>>({ role: 'Capturista', name: '', username: '' });
+  const [newUser, setNewUser] = useState<Partial<AppUser>>({ role: 'Capturista', name: '', username: '', password: '' });
 
   const [filters, setFilters] = useState({
     dateFrom: '',
@@ -231,6 +252,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(appUsers));
   }, [appUsers]);
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('current_user', JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem('current_user');
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem('destajistas', JSON.stringify(destajistas));
@@ -1085,6 +1114,86 @@ export default function App() {
     );
   }, [activeVoucher.header.paquete, activeVoucher.header.ubicacion, activeVoucher.templateId, activeVoucher.id, vouchers]);
 
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    const user = appUsers.find(u => u.username === loginUsername && u.password === loginPassword);
+    if (user) {
+      setCurrentUser(user);
+      setLoginUsername('');
+      setLoginPassword('');
+    } else {
+      setLoginError('Usuario o contraseña incorrectos');
+    }
+  };
+
+  if (!currentUser) {
+    return (
+      <div className="h-screen bg-stone-900 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Background Image */}
+        <div className="absolute inset-0 z-0">
+          <img src="https://images.unsplash.com/photo-1541888086425-d81bb19240f5?auto=format&fit=crop&q=80&w=2000" alt="Background" className="w-full h-full object-cover opacity-30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-stone-900 via-stone-900/80 to-stone-900/40"></div>
+        </div>
+
+        <div className="relative z-10 w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 bg-emerald-600 rounded-2xl shadow-[0_0_30px_rgba(16,185,129,0.5)] mb-6">
+              <img src="https://i.imgur.com/3q1q3Q1.png" alt="Logo" className="w-12 h-12 object-contain filter brightness-0 invert" />
+            </div>
+            <h1 className="text-4xl font-black text-white tracking-tighter" style={{ fontFamily: 'Impact, sans-serif', textShadow: '2px 2px 0 #059669' }}>
+              CONSTRU<span className="text-emerald-500">VIVIENDA</span>
+            </h1>
+            <p className="text-emerald-400 font-bold tracking-[0.2em] text-sm mt-2">SISTEMA DE VALES</p>
+          </div>
+
+          <form onSubmit={handleLogin} className="bg-stone-800/90 backdrop-blur-md border border-stone-700 p-8 rounded-2xl shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-6 text-center">Iniciar Sesión</h2>
+            
+            {loginError && (
+              <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-3 rounded-xl text-sm font-bold mb-6 text-center">
+                {loginError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Usuario</label>
+                <input 
+                  type="text" 
+                  value={loginUsername}
+                  onChange={e => setLoginUsername(e.target.value)}
+                  className="w-full px-4 py-3 bg-stone-900/50 border border-stone-700 rounded-xl text-white placeholder-stone-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="Ingresa tu usuario"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Contraseña</label>
+                <input 
+                  type="password" 
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-stone-900/50 border border-stone-700 rounded-xl text-white placeholder-stone-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full mt-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] uppercase tracking-wider"
+            >
+              Ingresar al Sistema
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen bg-[var(--color-app-bg)] font-sans text-stone-900 flex overflow-hidden">
       {/* Sidebar */}
@@ -1153,23 +1262,25 @@ export default function App() {
             )}
           </button>
           
-          <button 
-            onClick={() => setActiveTab('configuracion')}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
-              activeTab === 'configuracion' 
-                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
-                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
-            )}
-          >
-            <Settings size={20} className="shrink-0" />
-            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Ajustes y Plantillas</span>
-            {!isSidebarOpen && (
-              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                Ajustes y Plantillas
-              </div>
-            )}
-          </button>
+          {currentUser?.role === 'Administrador' && (
+            <button 
+              onClick={() => setActiveTab('configuracion')}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+                activeTab === 'configuracion' 
+                  ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                  : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+              )}
+            >
+              <Settings size={20} className="shrink-0" />
+              <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Ajustes y Plantillas</span>
+              {!isSidebarOpen && (
+                <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                  Ajustes y Plantillas
+                </div>
+              )}
+            </button>
+          )}
           
           <button 
             onClick={() => setActiveTab('reportes')}
@@ -1189,35 +1300,46 @@ export default function App() {
             )}
           </button>
 
-          <button 
-            onClick={() => setActiveTab('usuarios')}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
-              activeTab === 'usuarios' 
-                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
-                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
-            )}
-          >
-            <Users size={20} className="shrink-0" />
-            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Usuarios</span>
-            {!isSidebarOpen && (
-              <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                Usuarios
-              </div>
-            )}
-          </button>
+          {currentUser?.role === 'Administrador' && (
+            <button 
+              onClick={() => setActiveTab('usuarios')}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
+                activeTab === 'usuarios' 
+                  ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
+                  : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
+              )}
+            >
+              <Users size={20} className="shrink-0" />
+              <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Usuarios</span>
+              {!isSidebarOpen && (
+                <div className="absolute left-full ml-4 px-2 py-1 bg-stone-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                  Usuarios
+                </div>
+              )}
+            </button>
+          )}
         </div>
         
         {/* User Area */}
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold shrink-0">
-              CV
+              {currentUser?.name.substring(0, 2).toUpperCase()}
             </div>
-            <div className={cn("flex flex-col overflow-hidden transition-all duration-300", !isSidebarOpen && "w-0 opacity-0")}>
-              <span className="text-sm font-bold whitespace-nowrap">Administrador</span>
-              <span className="text-[10px] opacity-60 whitespace-nowrap">Sistema de Vales</span>
+            <div className={cn("flex flex-col overflow-hidden transition-all duration-300 flex-1", !isSidebarOpen && "w-0 opacity-0")}>
+              <span className="text-sm font-bold whitespace-nowrap truncate">{currentUser?.name}</span>
+              <span className="text-[10px] opacity-60 whitespace-nowrap truncate">{currentUser?.role}</span>
             </div>
+            {isSidebarOpen && (
+              <button 
+                onClick={() => setCurrentUser(null)}
+                className="p-2 text-stone-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                title="Cerrar Sesión"
+              >
+                <LogOut size={18} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1249,12 +1371,19 @@ export default function App() {
                    {/* Profile / Quick Stats */}
                    <div className="flex items-center gap-4 bg-black/40 backdrop-blur-md border border-white/10 p-3 rounded-xl">
                       <div className="w-12 h-12 bg-emerald-600 rounded-lg flex items-center justify-center text-xl font-black text-white border-2 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]">
-                        AD
+                        {currentUser?.name.substring(0, 2).toUpperCase()}
                       </div>
-                      <div>
-                        <h3 className="text-white font-bold uppercase tracking-wider text-sm">Administrador</h3>
-                        <p className="text-emerald-400 text-xs font-bold tracking-widest">NIVEL: ADMINISTRATIVO</p>
+                      <div className="pr-4">
+                        <h3 className="text-white font-bold uppercase tracking-wider text-sm">{currentUser?.name}</h3>
+                        <p className="text-emerald-400 text-xs font-bold tracking-widest uppercase">NIVEL: {currentUser?.role}</p>
                       </div>
+                      <button 
+                        onClick={() => setCurrentUser(null)}
+                        className="p-2 ml-2 text-stone-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border-l border-white/10"
+                        title="Cerrar Sesión"
+                      >
+                        <LogOut size={20} />
+                      </button>
                    </div>
                 </div>
 
@@ -1313,38 +1442,42 @@ export default function App() {
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Ajustes Card */}
-                      <button 
-                        onClick={() => setActiveTab('configuracion')}
-                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
-                      >
-                        <img src="https://images.unsplash.com/photo-1581092160562-40aa08e78837?auto=format&fit=crop&q=80&w=800" alt="Ajustes" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                        <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
-                          Sistema
-                        </div>
-                        <div className="absolute bottom-0 left-0 w-full p-4">
-                          <Settings className="text-emerald-400 mb-2" size={32} />
-                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Ajustes</h4>
-                          <p className="text-stone-300 text-xs mt-1">Plantillas y catálogos</p>
-                        </div>
-                      </button>
+                      {currentUser?.role === 'Administrador' && (
+                        <button 
+                          onClick={() => setActiveTab('configuracion')}
+                          className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                        >
+                          <img src="https://images.unsplash.com/photo-1581092160562-40aa08e78837?auto=format&fit=crop&q=80&w=800" alt="Ajustes" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                          <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
+                            Sistema
+                          </div>
+                          <div className="absolute bottom-0 left-0 w-full p-4">
+                            <Settings className="text-emerald-400 mb-2" size={32} />
+                            <h4 className="text-white font-black text-xl uppercase tracking-wider">Ajustes</h4>
+                            <p className="text-stone-300 text-xs mt-1">Plantillas y catálogos</p>
+                          </div>
+                        </button>
+                      )}
 
                       {/* Usuarios Card */}
-                      <button 
-                        onClick={() => setActiveTab('usuarios')}
-                        className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
-                      >
-                        <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" alt="Usuarios" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
-                        <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
-                          Administración
-                        </div>
-                        <div className="absolute bottom-0 left-0 w-full p-4">
-                          <Users className="text-emerald-400 mb-2" size={32} />
-                          <h4 className="text-white font-black text-xl uppercase tracking-wider">Usuarios</h4>
-                          <p className="text-stone-300 text-xs mt-1">Control de acceso</p>
-                        </div>
-                      </button>
+                      {currentUser?.role === 'Administrador' && (
+                        <button 
+                          onClick={() => setActiveTab('usuarios')}
+                          className="group relative h-48 sm:h-64 rounded-xl overflow-hidden border-2 border-white/10 hover:border-emerald-500 transition-all duration-300 shadow-2xl hover:shadow-[0_0_30px_rgba(16,185,129,0.3)] text-left"
+                        >
+                          <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" alt="Usuarios" className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-70 group-hover:opacity-100" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent"></div>
+                          <div className="absolute top-0 left-0 w-full bg-stone-800/90 backdrop-blur text-white text-[10px] font-bold tracking-widest uppercase py-1 px-3 border-b border-stone-700">
+                            Administración
+                          </div>
+                          <div className="absolute bottom-0 left-0 w-full p-4">
+                            <Users className="text-emerald-400 mb-2" size={32} />
+                            <h4 className="text-white font-black text-xl uppercase tracking-wider">Usuarios</h4>
+                            <p className="text-stone-300 text-xs mt-1">Control de acceso</p>
+                          </div>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -2237,6 +2370,7 @@ export default function App() {
                       <tr className="bg-stone-50 border-b border-stone-200 text-stone-500 text-xs uppercase tracking-wider">
                         <th className="px-6 py-4 font-bold">Nombre</th>
                         <th className="px-6 py-4 font-bold">Usuario</th>
+                        <th className="px-6 py-4 font-bold">Contraseña</th>
                         <th className="px-6 py-4 font-bold">Rol</th>
                         <th className="px-6 py-4 font-bold">Fecha Creación</th>
                         <th className="px-6 py-4 font-bold text-right">Acciones</th>
@@ -2246,7 +2380,8 @@ export default function App() {
                       {appUsers.map(user => (
                         <tr key={user.id} className="hover:bg-stone-50 transition-colors">
                           <td className="px-6 py-4 font-medium text-stone-800">{user.name}</td>
-                          <td className="px-6 py-4 text-stone-600">{user.username}</td>
+                          <td className="px-6 py-4 text-stone-600 font-mono text-sm">{user.username}</td>
+                          <td className="px-6 py-4 text-stone-600 font-mono text-sm">{user.password || 'N/A'}</td>
                           <td className="px-6 py-4">
                             <span className={cn(
                               "px-3 py-1 rounded-full text-xs font-bold",
@@ -2317,6 +2452,17 @@ export default function App() {
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-xs font-bold text-stone-500 uppercase">Contraseña</label>
+                  <input 
+                    type="password" 
+                    value={newUser.password || ''}
+                    onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
+                    placeholder="••••••••"
+                    className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-xs font-bold text-stone-500 uppercase">Rol</label>
                   <select 
                     value={newUser.role}
@@ -2338,19 +2484,20 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => {
-                    if (newUser.name && newUser.username) {
+                    if (newUser.name && newUser.username && newUser.password) {
                       setAppUsers(users => [...users, {
                         id: Date.now().toString(),
                         name: newUser.name!,
                         username: newUser.username!,
+                        password: newUser.password!,
                         role: newUser.role as 'Administrador' | 'Capturista',
                         createdAt: new Date().toISOString()
                       }]);
                       setShowUserModal(false);
-                      setNewUser({ role: 'Capturista', name: '', username: '' });
+                      setNewUser({ role: 'Capturista', name: '', username: '', password: '' });
                     }
                   }}
-                  disabled={!newUser.name || !newUser.username}
+                  disabled={!newUser.name || !newUser.username || !newUser.password}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-md"
                 >
                   Crear Usuario
