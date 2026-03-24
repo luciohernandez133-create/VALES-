@@ -1,0 +1,141 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - name: string
+    //   - email: string
+    //   - role: string ('Administrador' | 'Capturista')
+    //   - createdAt: string
+    //
+    // Collection: vouchers
+    // Document ID: {voucherId}
+    // Fields:
+    //   - id: string
+    //   - templateId: string
+    //   - header: map
+    //   - items: list
+    //   - createdAt: string
+    //   - createdBy: string
+    //
+    // Collection: customTemplates
+    // Document ID: {templateId}
+    // Fields:
+    //   - id: string
+    //   - concepto: string
+    //   - subConcepto: string
+    //   - items: list
+    //
+    // Collection: settings
+    // Document ID: lists
+    // Fields:
+    //   - destajistas: list
+    //   - elaboroList: list
+    //   - autorizoList: list
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'Administrador') ||
+        (request.auth.token.email == "luciohernandez133@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "administracion@construvivienda.local") ||
+        (request.auth.token.email == "admin@construvivienda.local")
+      );
+    }
+
+    function isCapturistaOrAdmin() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'Capturista')
+      );
+    }
+
+    function isOwner(email) {
+      return isAuthenticated() && request.auth.token.email == email;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'email', 'role', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['Administrador', 'Capturista'] &&
+             data.createdAt is string;
+    }
+
+    function isValidVoucher(data) {
+      return data.keys().hasAll(['id', 'templateId', 'header', 'items']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.templateId is string && data.templateId.size() > 0 && data.templateId.size() < 100 &&
+             data.header is map &&
+             data.items is list && data.items.size() <= 200;
+    }
+
+    function isValidTemplate(data) {
+      return data.keys().hasAll(['id', 'concepto', 'subConcepto', 'items']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.concepto is string && data.concepto.size() > 0 && data.concepto.size() < 200 &&
+             data.subConcepto is string && data.subConcepto.size() < 200 &&
+             data.items is list && data.items.size() <= 200;
+    }
+
+    function isValidSettingsLists(data) {
+      return data.keys().hasAll(['destajistas', 'elaboroList', 'autorizoList']) &&
+             data.destajistas is list && data.destajistas.size() <= 1000 &&
+             data.elaboroList is list && data.elaboroList.size() <= 1000 &&
+             data.autorizoList is list && data.autorizoList.size() <= 1000;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{email} {
+      // Any authenticated user can read users (needed for UI to show names)
+      allow read: if isAuthenticated();
+      
+      // Only admins can create/update users, OR the default admin can create themselves
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(email) && (request.auth.token.email == "luciohernandez133@gmail.com" || request.auth.token.email == "administracion@construvivienda.local" || request.auth.token.email == "admin@construvivienda.local")));
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && isAdmin();
+      allow delete: if isAdmin() && !isOwner(email); // Cannot delete self
+    }
+
+    match /vouchers/{voucherId} {
+      allow read: if isCapturistaOrAdmin();
+      allow create: if isCapturistaOrAdmin() && isValidVoucher(request.resource.data);
+      allow update: if isCapturistaOrAdmin() && isValidVoucher(request.resource.data);
+      allow delete: if isCapturistaOrAdmin();
+    }
+
+    match /customTemplates/{templateId} {
+      allow read: if isCapturistaOrAdmin();
+      allow create: if isAdmin() && isValidTemplate(request.resource.data);
+      allow update: if isAdmin() && isValidTemplate(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if isCapturistaOrAdmin();
+      allow create: if isAdmin() && docId == 'lists' && isValidSettingsLists(request.resource.data);
+      allow update: if isAdmin() && docId == 'lists' && isValidSettingsLists(request.resource.data);
+      allow delete: if false;
+    }
+  }
+}

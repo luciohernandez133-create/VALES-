@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "VoucherItem": {
+      "title": "VoucherItem",
+      "description": "An item in a voucher",
+      "type": "object",
+      "properties": {
+        "unidad": { "type": "string" },
+        "cantidad": { "type": "number" },
+        "descripcion": { "type": "string" }
+      },
+      "required": ["unidad", "cantidad", "descripcion"]
+    },
+    "VoucherHeader": {
+      "title": "VoucherHeader",
+      "description": "Header information for a voucher",
+      "type": "object",
+      "properties": {
+        "obra": { "type": "string" },
+        "prototipo": { "type": "string" },
+        "paquete": { "type": "string" },
+        "fecha": { "type": "string" },
+        "ubicacion": { "type": "string" },
+        "destajista": { "type": "string" },
+        "folio": { "type": "string" },
+        "elaboro": { "type": "string" },
+        "autorizo": { "type": "string" },
+        "concepto": { "type": "string" },
+        "fueraPresupuesto": { "type": "boolean" }
+      },
+      "required": ["obra", "prototipo", "paquete", "fecha", "ubicacion", "destajista", "folio", "elaboro", "autorizo", "concepto", "fueraPresupuesto"]
+    },
+    "VoucherData": {
+      "title": "VoucherData",
+      "description": "A complete voucher record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "templateId": { "type": "string" },
+        "header": { "$ref": "#/entities/VoucherHeader" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/entities/VoucherItem" }
+        },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "templateId", "header", "items"]
+    },
+    "VoucherTemplate": {
+      "title": "VoucherTemplate",
+      "description": "A custom template for vouchers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "concepto": { "type": "string" },
+        "subConcepto": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/entities/VoucherItem" }
+        }
+      },
+      "required": ["id", "concepto", "subConcepto", "items"]
+    },
+    "AppUser": {
+      "title": "AppUser",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string", "enum": ["Administrador", "Capturista"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "username", "password", "role", "createdAt"]
+    },
+    "SettingsLists": {
+      "title": "SettingsLists",
+      "description": "Global lists for dropdowns",
+      "type": "object",
+      "properties": {
+        "destajistas": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "elaboroList": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "autorizoList": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["destajistas", "elaboroList", "autorizoList"]
+    }
+  },
+  "firestore": {
+    "/vouchers/{voucherId}": {
+      "schema": { "$ref": "#/entities/VoucherData" },
+      "description": "Stores all voucher records"
+    },
+    "/customTemplates/{templateId}": {
+      "schema": { "$ref": "#/entities/VoucherTemplate" },
+      "description": "Stores custom voucher templates"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/AppUser" },
+      "description": "Stores application users"
+    },
+    "/settings/lists": {
+      "schema": { "$ref": "#/entities/SettingsLists" },
+      "description": "Stores global lists for dropdowns"
+    }
+  }
+}

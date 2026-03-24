@@ -10,6 +10,9 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { db, auth } from './firebase';
+import { collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
@@ -17,11 +20,61 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 interface AppUser {
   id: string;
   name: string;
-  username: string;
-  password?: string;
+  email: string;
   role: 'Administrador' | 'Capturista';
   createdAt: string;
 }
@@ -45,6 +98,8 @@ interface VoucherData {
   templateId: string;
   header: VoucherHeader;
   items: VoucherItem[];
+  createdAt?: string;
+  createdBy?: string;
 }
 
 const LOCATION_DATA: Record<string, { mza: number, lotes: number[] }[]> = {
@@ -98,77 +153,25 @@ const LOCATION_DATA: Record<string, { mza: number, lotes: number[] }[]> = {
 };
 
 export default function App() {
-  const [vouchers, setVouchers] = useState<VoucherData[]>(() => {
-    const saved = localStorage.getItem('vouchers');
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: 'initial',
-        templateId: 'cimentacion-acero',
-        header: {
-          obra: 'INFONAVIT BICENTENARIO',
-          prototipo: 'BIC INF DIAM F',
-          paquete: '25 BIC INF DIAM F',
-          fecha: new Date().toLocaleDateString('es-MX'),
-          ubicacion: 'MANZANA 1 LOTE 1',
-          destajista: 'JUAN PEREZ',
-          folio: 'F01',
-          elaboro: 'ING. LUCIO HERNANDEZ',
-          autorizo: 'ARQ. RESIDENTE',
-          concepto: 'INFO-CIMENTACION ARMADO HABILITADO Y COLADO',
-          fueraPresupuesto: false,
-        },
-        items: [
-          { unidad: 'SACO', cantidad: 0.5, descripcion: 'CEMENTO GRIS SACO DE 50 KG' },
-          { unidad: 'LT', cantidad: 8, descripcion: 'ADEBON' },
-          { unidad: 'PZA', cantidad: 0.5, descripcion: 'BROCHA DE CERDA 4 (FUERA DE PPTO)' },
-        ],
-      }
-    ];
-  });
-  
-  const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>(() => {
-    const saved = localStorage.getItem('customTemplates');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  const [activeVoucherId, setActiveVoucherId] = useState<string>(() => {
-    const saved = localStorage.getItem('activeVoucherId');
-    if (saved && vouchers.some(v => v.id === saved)) return saved;
-    return vouchers[0]?.id || 'initial';
-  });
+  const [vouchers, setVouchers] = useState<VoucherData[]>([]);
+  const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>([]);
+  const [activeVoucherId, setActiveVoucherId] = useState<string>('initial');
   const [activeTab, setActiveTab] = useState<'inicio' | 'captura' | 'reportes' | 'configuracion' | 'usuarios'>('inicio');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   // User Management State
-  const [appUsers, setAppUsers] = useState<AppUser[]>(() => {
-    const saved = localStorage.getItem('app_users');
-    const parsedUsers = saved ? JSON.parse(saved) : [];
-    
-    // Ensure admin exists and has a password
-    const adminExists = parsedUsers.find((u: AppUser) => u.username === 'admin');
-    if (!adminExists) {
-      parsedUsers.push({ id: '1', name: 'Administrador Principal', username: 'admin', password: '123', role: 'Administrador', createdAt: new Date().toISOString() });
-    } else if (!adminExists.password) {
-      adminExists.password = '123'; // Default password for existing admin
-    }
-    
-    return parsedUsers.length > 0 ? parsedUsers : [
-      { id: '1', name: 'Administrador Principal', username: 'admin', password: '123', role: 'Administrador', createdAt: new Date().toISOString() }
-    ];
-  });
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
-    const saved = localStorage.getItem('current_user');
-    return saved ? JSON.parse(saved) : null;
-  });
-  
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
 
   const [showUserModal, setShowUserModal] = useState(false);
-  const [newUser, setNewUser] = useState<Partial<AppUser>>({ role: 'Capturista', name: '', username: '', password: '' });
+  const [newUser, setNewUser] = useState<Partial<AppUser> & { password?: string }>({ role: 'Capturista', name: '', email: '', password: '' });
 
   const [filters, setFilters] = useState({
     dateFrom: '',
@@ -185,9 +188,7 @@ export default function App() {
   const [editingList, setEditingList] = useState<'destajistas' | 'elaboro' | 'autorizo'>('destajistas');
   const [newItemName, setNewItemName] = useState('');
 
-  const [destajistas, setDestajistas] = useState<string[]>(() => {
-    const saved = localStorage.getItem('destajistas');
-    return saved ? JSON.parse(saved) : [
+  const [destajistas, setDestajistas] = useState<string[]>([
       "EMMANUEL ZARRAZAGA GAMAS",
       "FELIPE REYES JIMENEZ",
       "CECILIO FUENTE DE LA CRUZ",
@@ -211,22 +212,16 @@ export default function App() {
       "LUIS ALBERTO MAY PEREZ",
       "VICTOR MANUEL CASTILLO TORRES",
       "JOSE HEBER FUENTES DE LA CRUZ"
-    ];
-  });
+  ]);
 
-  const [elaboroList, setElaboroList] = useState<string[]>(() => {
-    const saved = localStorage.getItem('elaboroList');
-    return saved ? JSON.parse(saved) : [
+  const [elaboroList, setElaboroList] = useState<string[]>([
       "ING. LUCIO HERNANDEZ DOMINGUEZ",
       "ING. ANTONY EMANUEL CALDERON CRUZ",
       "ING. ARAMANDO LOPEZ ARRAZOLA",
       "ING. ALEJANDRO HIDALGO LOPEZ"
-    ];
-  });
+  ]);
 
-  const [autorizoList, setAutorizoList] = useState<string[]>(() => {
-    const saved = localStorage.getItem('autorizoList');
-    return saved ? JSON.parse(saved) : [
+  const [autorizoList, setAutorizoList] = useState<string[]>([
       "ING. ORLANDO CORDOVA GARCIA",
       "ING. DARVELIO ALVARO MAYO",
       "ING. MANUEL MORALES CADENAS",
@@ -234,67 +229,135 @@ export default function App() {
       "ARQ. JUAN ANTONIO CERINO CRUZ",
       "ING. JOSE ACOSTA RODRIGUEZ",
       "ING. JORGE ARTURO CRUZ GARCIA"
-    ];
-  });
+  ]);
 
   useEffect(() => {
-    localStorage.setItem('vouchers', JSON.stringify(vouchers));
-  }, [vouchers]);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user && user.email) {
+        try {
+          const userEmail = user.email.toLowerCase().trim();
+          const userDoc = await getDoc(doc(db, 'users', userEmail));
+          if (userDoc.exists()) {
+            setCurrentUser(userDoc.data() as AppUser);
+          } else if (userEmail === 'luciohernandez133@gmail.com' || userEmail === 'admin@construvivienda.local' || userEmail === 'administracion@construvivienda.local') {
+            const newAdmin: AppUser = {
+              id: userEmail,
+              name: user.displayName || (userEmail.includes('administracion') ? 'Administración' : 'Administrador Principal'),
+              email: userEmail,
+              role: 'Administrador',
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'users', userEmail), newAdmin);
+            setCurrentUser(newAdmin);
+          } else {
+            setCurrentUser(null);
+            await signOut(auth);
+            setLoginError('Tu cuenta no está registrada en el sistema. Contacta al administrador.');
+          }
+        } catch (error) {
+          console.error("Error checking user:", error);
+          setCurrentUser(null);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
-  }, [customTemplates]);
+    if (!isAuthReady || !currentUser) return;
 
-  useEffect(() => {
-    localStorage.setItem('activeVoucherId', activeVoucherId);
-  }, [activeVoucherId]);
+    const unsubVouchers = onSnapshot(collection(db, 'vouchers'), (snapshot) => {
+      const v = snapshot.docs.map(doc => doc.data() as VoucherData);
+      setVouchers(v);
+      setIsDataLoaded(true);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'vouchers'));
 
-  useEffect(() => {
-    localStorage.setItem('app_users', JSON.stringify(appUsers));
-  }, [appUsers]);
+    const unsubTemplates = onSnapshot(collection(db, 'customTemplates'), (snapshot) => {
+      setCustomTemplates(snapshot.docs.map(doc => doc.data() as VoucherTemplate));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'customTemplates'));
 
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('current_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('current_user');
-    }
-  }, [currentUser]);
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setAppUsers(snapshot.docs.map(doc => doc.data() as AppUser));
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
 
-  useEffect(() => {
-    localStorage.setItem('destajistas', JSON.stringify(destajistas));
-  }, [destajistas]);
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'lists'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.destajistas) setDestajistas(data.destajistas);
+        if (data.elaboroList) setElaboroList(data.elaboroList);
+        if (data.autorizoList) setAutorizoList(data.autorizoList);
+      } else if (currentUser.role === 'Administrador') {
+        // Initialize settings if admin
+        setDoc(doc(db, 'settings', 'lists'), {
+          destajistas,
+          elaboroList,
+          autorizoList
+        }).catch(e => console.error("Error initializing settings", e));
+      }
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'settings/lists'));
 
-  useEffect(() => {
-    localStorage.setItem('elaboroList', JSON.stringify(elaboroList));
-  }, [elaboroList]);
+    return () => {
+      unsubVouchers();
+      unsubTemplates();
+      unsubUsers();
+      unsubSettings();
+    };
+  }, [isAuthReady, currentUser]);
 
-  useEffect(() => {
-    localStorage.setItem('autorizoList', JSON.stringify(autorizoList));
-  }, [autorizoList]);
-
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!newItemName.trim() || !editingList) return;
     const upperName = newItemName.trim().toUpperCase();
     
+    let newDestajistas = [...destajistas];
+    let newElaboro = [...elaboroList];
+    let newAutorizo = [...autorizoList];
+
     if (editingList === 'destajistas') {
-      if (!destajistas.includes(upperName)) setDestajistas([...destajistas, upperName]);
+      if (!destajistas.includes(upperName)) newDestajistas.push(upperName);
     } else if (editingList === 'elaboro') {
-      if (!elaboroList.includes(upperName)) setElaboroList([...elaboroList, upperName]);
+      if (!elaboroList.includes(upperName)) newElaboro.push(upperName);
     } else if (editingList === 'autorizo') {
-      if (!autorizoList.includes(upperName)) setAutorizoList([...autorizoList, upperName]);
+      if (!autorizoList.includes(upperName)) newAutorizo.push(upperName);
     }
-    setNewItemName('');
+    
+    try {
+      await setDoc(doc(db, 'settings', 'lists'), {
+        destajistas: newDestajistas,
+        elaboroList: newElaboro,
+        autorizoList: newAutorizo
+      }, { merge: true });
+      setNewItemName('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/lists');
+    }
   };
 
-  const handleRemoveItem = (index: number) => {
+  const handleRemoveItem = async (index: number) => {
     if (!editingList) return;
+    
+    let newDestajistas = [...destajistas];
+    let newElaboro = [...elaboroList];
+    let newAutorizo = [...autorizoList];
+
     if (editingList === 'destajistas') {
-      setDestajistas(destajistas.filter((_, i) => i !== index));
+      newDestajistas = destajistas.filter((_, i) => i !== index);
     } else if (editingList === 'elaboro') {
-      setElaboroList(elaboroList.filter((_, i) => i !== index));
+      newElaboro = elaboroList.filter((_, i) => i !== index);
     } else if (editingList === 'autorizo') {
-      setAutorizoList(autorizoList.filter((_, i) => i !== index));
+      newAutorizo = autorizoList.filter((_, i) => i !== index);
+    }
+
+    try {
+      await setDoc(doc(db, 'settings', 'lists'), {
+        destajistas: newDestajistas,
+        elaboroList: newElaboro,
+        autorizoList: newAutorizo
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/lists');
     }
   };
 
@@ -335,18 +398,18 @@ export default function App() {
   const voucherRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   useEffect(() => {
-    if (conceptRef.current) {
+    if (conceptRef.current && activeVoucher) {
       conceptRef.current.style.height = 'auto';
       conceptRef.current.style.height = conceptRef.current.scrollHeight + 'px';
     }
-  }, [activeVoucher.header.concepto]);
+  }, [activeVoucher?.header.concepto]);
 
-  const handleAddVoucher = (template?: VoucherTemplate) => {
+  const handleAddVoucher = async (template?: VoucherTemplate) => {
     const newId = crypto.randomUUID();
     const targetTemplate = template || allTemplates[0];
     
     let initialFolio = '';
-    let initialPrototipo = activeVoucher.header.prototipo;
+    let initialPrototipo = activeVoucher?.header.prototipo || '';
     
     if (targetTemplate.subConcepto && targetTemplate.subConcepto !== 'NUEVO VALE EDITABLE') {
       const letter = targetTemplate.subConcepto.trim().slice(-1).toUpperCase();
@@ -357,7 +420,17 @@ export default function App() {
       id: newId,
       templateId: targetTemplate.id,
       header: { 
-        ...activeVoucher.header, 
+        ...(activeVoucher?.header || {
+          obra: 'INFONAVIT BICENTENARIO',
+          paquete: '',
+          fecha: new Date().toLocaleDateString('es-MX'),
+          ubicacion: '',
+          destajista: '',
+          folio: '',
+          elaboro: '',
+          autorizo: '',
+          fueraPresupuesto: false,
+        }), 
         obra: 'INFONAVIT BICENTENARIO',
         prototipo: initialPrototipo,
         folio: initialFolio,
@@ -366,9 +439,16 @@ export default function App() {
         fueraPresupuesto: false
       },
       items: [...targetTemplate.items],
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser?.email || 'unknown'
     };
-    setVouchers(prev => [...prev, newVoucher]);
-    setActiveVoucherId(newId);
+    
+    try {
+      await setDoc(doc(db, 'vouchers', newId), newVoucher);
+      setActiveVoucherId(newId);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'vouchers');
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -385,8 +465,6 @@ export default function App() {
 
       if (data.length > 0) {
         const newVouchers: VoucherData[] = [];
-        // Group by Folio or some unique ID if possible, or just create one per row if it's a list of items
-        // For this app, let's assume each row is a voucher or we group them
         
         const grouped = data.reduce((acc, row) => {
           const key = row.Folio || row.folio || 'S/F';
@@ -418,57 +496,81 @@ export default function App() {
               unidad: r.Unidad || r.unidad || '',
               cantidad: r.Cantidad || r.cantidad || 0,
               descripcion: r.Descripcion || r.descripcion || '',
-            }))
+            })),
+            createdAt: new Date().toISOString(),
+            createdBy: currentUser?.email || 'unknown'
           });
         });
 
-        setVouchers(newVouchers);
-        setActiveVoucherId(newVouchers[0].id);
+        const batch = writeBatch(db);
+        newVouchers.forEach(v => {
+          batch.set(doc(db, 'vouchers', v.id), v);
+        });
+        
+        batch.commit().then(() => {
+          setActiveVoucherId(newVouchers[0].id);
+        }).catch(error => {
+          handleFirestoreError(error, OperationType.CREATE, 'vouchers');
+        });
       }
     };
     reader.readAsBinaryString(file);
   };
 
-  const handleRemoveVoucher = (id: string) => {
+  const handleRemoveVoucher = async (id: string) => {
     if (vouchers.length === 1) return;
-    setVouchers(prev => {
-      const newVouchers = prev.filter(v => v.id !== id);
+    try {
+      await deleteDoc(doc(db, 'vouchers', id));
       if (activeVoucherId === id) {
-        setActiveVoucherId(newVouchers[0].id);
+        setActiveVoucherId(vouchers.find(v => v.id !== id)?.id || 'initial');
       }
-      return newVouchers;
-    });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'vouchers');
+    }
   };
 
-  const updateActiveVoucher = (updates: Partial<VoucherData>) => {
-    setVouchers(prev => prev.map(v => v.id === activeVoucherId ? { ...v, ...updates } : v));
+  const updateActiveVoucher = async (updates: Partial<VoucherData>) => {
+    if (!activeVoucher) return;
+    try {
+      await updateDoc(doc(db, 'vouchers', activeVoucher.id), updates);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'vouchers');
+    }
   };
 
-  const updateItem = (index: number, field: keyof VoucherItem, value: string | number) => {
+  const updateItem = async (index: number, field: keyof VoucherItem, value: string | number) => {
+    if (!activeVoucher) return;
     const newItems = [...activeVoucher.items];
     newItems[index] = { ...newItems[index], [field]: value } as VoucherItem;
-    updateActiveVoucher({ items: newItems });
+    await updateActiveVoucher({ items: newItems });
   };
 
-  const addItem = () => {
-    updateActiveVoucher({ 
+  const addItem = async () => {
+    if (!activeVoucher) return;
+    await updateActiveVoucher({ 
       items: [...activeVoucher.items, { unidad: 'PZA', cantidad: 1, descripcion: '' }] 
     });
   };
 
-  const removeItem = (index: number) => {
-    updateActiveVoucher({ 
+  const removeItem = async (index: number) => {
+    if (!activeVoucher) return;
+    await updateActiveVoucher({ 
       items: activeVoucher.items.filter((_, i) => i !== index) 
     });
   };
 
-  const handleTemplateChange = (templateId: string) => {
-    const template = allTemplates.find(t => t.id === templateId);
-    if (template) {
-      updateActiveVoucher({ 
-        templateId, 
+  const handleTemplateChange = async (value: string) => {
+    const template = allTemplates.find(t => t.subConcepto === value || t.concepto === value || t.id === value);
+    if (template && activeVoucher) {
+      await updateActiveVoucher({ 
+        templateId: template.id, 
         header: { ...activeVoucher.header, concepto: template.concepto },
         items: template.items 
+      });
+    } else if (activeVoucher) {
+      await updateActiveVoucher({
+        templateId: 'empty',
+        header: { ...activeVoucher.header, concepto: value }
       });
     }
   };
@@ -521,7 +623,13 @@ export default function App() {
       }
 
       if (newTemplates.length > 0) {
-        setCustomTemplates(prev => [...prev, ...newTemplates]);
+        const batch = writeBatch(db);
+        newTemplates.forEach(t => {
+          batch.set(doc(db, 'customTemplates', t.id), t);
+        });
+        await batch.commit().catch(error => {
+          handleFirestoreError(error, OperationType.CREATE, 'customTemplates');
+        });
         alert(`Se importaron ${newTemplates.length} plantillas exitosamente.`);
       } else {
         alert('No se encontraron plantillas válidas en el PDF. Asegúrate de que el formato sea el correcto.');
@@ -1079,8 +1187,16 @@ export default function App() {
         const validTemplates = newTemplates.filter(t => t.concepto && t.subConcepto && Array.isArray(t.items));
         
         if (validTemplates.length > 0) {
-          setCustomTemplates(prev => [...prev, ...validTemplates]);
-          alert(`${validTemplates.length} plantillas añadidas correctamente.`);
+          const batch = writeBatch(db);
+          validTemplates.forEach((t: any) => {
+            const id = t.id || `custom-${crypto.randomUUID()}`;
+            batch.set(doc(db, 'customTemplates', id), { ...t, id });
+          });
+          batch.commit().then(() => {
+            alert(`${validTemplates.length} plantillas añadidas correctamente.`);
+          }).catch(error => {
+            handleFirestoreError(error, OperationType.CREATE, 'customTemplates');
+          });
         } else {
           alert("El archivo no contiene plantillas válidas.");
         }
@@ -1104,7 +1220,7 @@ export default function App() {
   );
 
   const isDuplicateVoucher = useMemo(() => {
-    if (!activeVoucher.header.paquete || !activeVoucher.header.ubicacion || !activeVoucher.templateId) return false;
+    if (!activeVoucher || !activeVoucher.header.paquete || !activeVoucher.header.ubicacion || !activeVoucher.templateId) return false;
     
     return vouchers.some(v => 
       v.id !== activeVoucher.id && 
@@ -1112,20 +1228,53 @@ export default function App() {
       v.header.ubicacion === activeVoucher.header.ubicacion && 
       v.templateId === activeVoucher.templateId
     );
-  }, [activeVoucher.header.paquete, activeVoucher.header.ubicacion, activeVoucher.templateId, activeVoucher.id, vouchers]);
+  }, [activeVoucher?.header.paquete, activeVoucher?.header.ubicacion, activeVoucher?.templateId, activeVoucher?.id, vouchers]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
-    const user = appUsers.find(u => u.username === loginUsername && u.password === loginPassword);
-    if (user) {
-      setCurrentUser(user);
-      setLoginUsername('');
-      setLoginPassword('');
-    } else {
-      setLoginError('Usuario o contraseña incorrectos');
+    if (!loginEmail || !loginPassword) {
+      setLoginError('Por favor ingresa usuario y contraseña');
+      return;
+    }
+    const emailToUse = loginEmail.includes('@') ? loginEmail : `${loginEmail.toLowerCase().trim()}@construvivienda.local`;
+    
+    try {
+      await signInWithEmailAndPassword(auth, emailToUse, loginPassword);
+    } catch (error: any) {
+      if (emailToUse === 'administracion@construvivienda.local' || emailToUse === 'admin@construvivienda.local') {
+        try {
+          const { createUserWithEmailAndPassword } = await import('firebase/auth');
+          await createUserWithEmailAndPassword(auth, emailToUse, loginPassword);
+          return;
+        } catch (e: any) {
+          console.error("Auto-create error:", e);
+          if (e.code === 'auth/operation-not-allowed') {
+            setLoginError('Error: El inicio de sesión con Usuario/Contraseña no está activado en Firebase. Debes activarlo en la consola.');
+            return;
+          }
+          if (e.code === 'auth/weak-password') {
+            setLoginError('Error: La contraseña debe tener al menos 6 caracteres.');
+            return;
+          }
+          if (e.code === 'auth/email-already-in-use') {
+            setLoginError('La contraseña es incorrecta. Como es un correo local (.local), no puedes recuperar la contraseña. Por favor, intenta ingresar con el usuario "admin" y una contraseña nueva, o elimina el usuario desde la consola de Firebase.');
+            return;
+          }
+          // Fall through for other errors
+        }
+      }
+      setLoginError('Usuario o contraseña incorrectos. Si eres nuevo, pide al administrador que te cree una cuenta.');
     }
   };
+
+  if (!isAuthReady) {
+    return (
+      <div className="h-screen bg-stone-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500"></div>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (
@@ -1158,24 +1307,23 @@ export default function App() {
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Usuario</label>
+                <label className="block text-stone-400 text-xs font-bold mb-2 uppercase tracking-wider">Usuario</label>
                 <input 
                   type="text" 
-                  value={loginUsername}
-                  onChange={e => setLoginUsername(e.target.value)}
-                  className="w-full px-4 py-3 bg-stone-900/50 border border-stone-700 rounded-xl text-white placeholder-stone-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                  placeholder="Ingresa tu usuario"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="w-full bg-stone-900 border border-stone-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                  placeholder="Ej. admin"
                   required
                 />
               </div>
-              
               <div>
-                <label className="block text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">Contraseña</label>
+                <label className="block text-stone-400 text-xs font-bold mb-2 uppercase tracking-wider">Contraseña</label>
                 <input 
                   type="password" 
                   value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  className="w-full px-4 py-3 bg-stone-900/50 border border-stone-700 rounded-xl text-white placeholder-stone-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-stone-900 border border-stone-600 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
                   placeholder="••••••••"
                   required
                 />
@@ -1186,10 +1334,22 @@ export default function App() {
               type="submit"
               className="w-full mt-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] uppercase tracking-wider"
             >
-              Ingresar al Sistema
+              Ingresar
             </button>
           </form>
         </div>
+      </div>
+    );
+  }
+
+  if (!isDataLoaded) {
+    return (
+      <div className="h-screen bg-stone-900 flex flex-col items-center justify-center p-4">
+        <div className="w-20 h-20 bg-emerald-600 rounded-2xl mx-auto flex items-center justify-center shadow-2xl shadow-emerald-900/50 mb-6 animate-pulse">
+          <FileText size={40} className="text-white" />
+        </div>
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500 mb-4"></div>
+        <p className="text-stone-400 text-sm font-medium tracking-widest uppercase">Cargando datos...</p>
       </div>
     );
   }
@@ -1333,7 +1493,7 @@ export default function App() {
             </div>
             {isSidebarOpen && (
               <button 
-                onClick={() => setCurrentUser(null)}
+                onClick={() => signOut(auth)}
                 className="p-2 text-stone-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
                 title="Cerrar Sesión"
               >
@@ -1378,7 +1538,7 @@ export default function App() {
                         <p className="text-emerald-400 text-xs font-bold tracking-widest uppercase">NIVEL: {currentUser?.role}</p>
                       </div>
                       <button 
-                        onClick={() => setCurrentUser(null)}
+                        onClick={() => signOut(auth)}
                         className="p-2 ml-2 text-stone-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border-l border-white/10"
                         title="Cerrar Sesión"
                       >
@@ -1585,25 +1745,30 @@ export default function App() {
         {/* Main Content Grid */}
         {activeTab === 'captura' && (
           <div className="flex-1 overflow-hidden">
-            <div className="grid grid-cols-1 xl:grid-cols-[600px_1fr] h-full w-full items-start">
-            {/* Form Area */}
-            <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
-              <div className="space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-                  <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest whitespace-nowrap">Detalles del Vale</h3>
-                  <div className="flex items-center gap-2 flex-1 md:justify-end w-full">
-                    <label className="text-xs font-bold text-stone-400 uppercase whitespace-nowrap">Selección Rápida:</label>
-                    <select 
-                      value={activeVoucher.templateId}
-                      onChange={(e) => handleTemplateChange(e.target.value)}
-                      className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all flex-1 min-w-[200px] max-w-full"
-                    >
-                      {allTemplates.map(t => (
-                        <option key={t.id} value={t.id}>{t.concepto}</option>
-                      ))}
-                    </select>
+            {activeVoucher ? (
+              <div className="grid grid-cols-1 xl:grid-cols-[600px_1fr] h-full w-full items-start">
+              {/* Form Area */}
+              <div className="bg-white p-3 md:p-4 space-y-4 border-r border-stone-200 h-full overflow-y-auto scrollbar-hide">
+                <div className="space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                    <h3 className="text-sm font-bold text-stone-800 uppercase tracking-widest whitespace-nowrap">Detalles del Vale</h3>
+                    <div className="flex items-center gap-2 flex-1 md:justify-end w-full">
+                      <label className="text-xs font-bold text-stone-400 uppercase whitespace-nowrap">Selección Rápida:</label>
+                      <input 
+                        type="text"
+                        list="templates-list"
+                        value={activeVoucher.templateId === 'empty' ? activeVoucher.header.concepto : (allTemplates.find(t => t.id === activeVoucher.templateId)?.subConcepto || activeVoucher.header.concepto)}
+                        onChange={(e) => handleTemplateChange(e.target.value.toUpperCase())}
+                        placeholder="Buscar o escribir subconcepto..."
+                        className="px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none transition-all flex-1 min-w-[200px] max-w-full"
+                      />
+                      <datalist id="templates-list">
+                        {allTemplates.map(t => (
+                          <option key={t.id} value={t.subConcepto || t.concepto} />
+                        ))}
+                      </datalist>
+                    </div>
                   </div>
-                </div>
 
               {/* Vales Activos Tabs */}
               <div className="space-y-3">
@@ -1680,26 +1845,19 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Ubicación</label>
-                  {getLocationsForPackage(activeVoucher.header.paquete).length > 0 ? (
-                    <select 
-                      value={activeVoucher.header.ubicacion}
-                      onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value } })}
-                      className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                    >
-                      <option value="">Seleccionar Ubicación...</option>
-                      {getLocationsForPackage(activeVoucher.header.paquete).map(loc => (
-                        <option key={loc} value={loc}>{loc}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input 
-                      type="text" 
-                      value={activeVoucher.header.ubicacion}
-                      onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value } })}
-                      className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                      placeholder="Escribir ubicación..."
-                    />
-                  )}
+                  <input 
+                    type="text" 
+                    list="ubicacion-list"
+                    value={activeVoucher.header.ubicacion}
+                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, ubicacion: e.target.value.toUpperCase() } })}
+                    placeholder="Buscar o escribir ubicación..."
+                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  />
+                  <datalist id="ubicacion-list">
+                    {getLocationsForPackage(activeVoucher.header.paquete).map(loc => (
+                      <option key={loc} value={loc} />
+                    ))}
+                  </datalist>
                   {isDuplicateVoucher && (
                     <div className="flex items-start gap-1.5 mt-1 text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-200">
                       <AlertTriangle size={14} className="shrink-0 mt-0.5" />
@@ -1740,42 +1898,51 @@ export default function App() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Destajista</label>
-                  <select 
+                  <input 
+                    type="text"
+                    list="destajistas-list"
                     value={activeVoucher.header.destajista}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, destajista: e.target.value } })}
+                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, destajista: e.target.value.toUpperCase() } })}
+                    placeholder="Buscar o escribir destajista..."
                     className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  >
-                    <option value="">Seleccionar Destajista...</option>
+                  />
+                  <datalist id="destajistas-list">
                     {destajistas.map(name => (
-                      <option key={name} value={name}>{name}</option>
+                      <option key={name} value={name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Elaboró</label>
-                  <select 
+                  <input 
+                    type="text"
+                    list="elaboro-list"
                     value={activeVoucher.header.elaboro}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, elaboro: e.target.value } })}
+                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, elaboro: e.target.value.toUpperCase() } })}
+                    placeholder="Buscar o escribir elaboró..."
                     className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  >
-                    <option value="">Seleccionar Elaboró...</option>
+                  />
+                  <datalist id="elaboro-list">
                     {elaboroList.map(name => (
-                      <option key={name} value={name}>{name}</option>
+                      <option key={name} value={name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-stone-400 uppercase">Autorizó</label>
-                  <select 
+                  <input 
+                    type="text"
+                    list="autorizo-list"
                     value={activeVoucher.header.autorizo}
-                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, autorizo: e.target.value } })}
+                    onChange={e => updateActiveVoucher({ header: { ...activeVoucher.header, autorizo: e.target.value.toUpperCase() } })}
+                    placeholder="Buscar o escribir autorizó..."
                     className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-                  >
-                    <option value="">Seleccionar Autorizó...</option>
+                  />
+                  <datalist id="autorizo-list">
                     {autorizoList.map(name => (
-                      <option key={name} value={name}>{name}</option>
+                      <option key={name} value={name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div className="md:col-span-3 flex items-center gap-3 pt-2">
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -1923,24 +2090,30 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="w-full overflow-hidden flex justify-center bg-white rounded-lg p-1 md:p-2 border border-stone-200 shadow-sm" id="preview-area-container">
-                  <div className="relative w-full aspect-[8.5/5.5] max-w-4xl">
-                    {vouchers.map((v) => {
-                      const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
-                      const isActive = v.id === activeVoucherId;
-                      
-                      return (
-                        <div 
-                          key={v.id}
-                          id={`voucher-${v.id}`}
-                          ref={el => voucherRefs.current[v.id] = el}
-                          className={cn(
-                            "bg-white p-3 md:p-5 border border-stone-300 shadow-xl text-[10px] leading-tight text-black transition-all absolute top-0 left-0 w-full h-full flex flex-col",
-                            isActive ? "opacity-100 z-10 scale-100" : "opacity-0 -z-10 pointer-events-none" 
-                          )}
-                          style={{ fontFamily: 'Arial, sans-serif' }}
-                        >
-                    {/* Header */}
+                <div className="w-full overflow-y-auto flex flex-col items-center bg-stone-100/50 rounded-lg p-2 md:p-4 border border-stone-200 shadow-inner max-h-[calc(100vh-12rem)] gap-6" id="preview-area-container">
+                  {vouchers.sort((a, b) => (a.id === activeVoucherId ? -1 : b.id === activeVoucherId ? 1 : 0)).map((v) => {
+                    const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
+                    const isActive = v.id === activeVoucherId;
+                    
+                    return (
+                      <div 
+                        key={v.id}
+                        id={`voucher-${v.id}`}
+                        ref={el => voucherRefs.current[v.id] = el}
+                        className={cn(
+                          "bg-white p-3 md:p-5 border shadow-xl text-[10px] leading-tight text-black transition-all w-full aspect-[8.5/5.5] max-w-4xl flex flex-col shrink-0 relative",
+                          isActive ? "border-emerald-500 ring-4 ring-emerald-500/20" : "border-stone-300 opacity-70 hover:opacity-100 cursor-pointer" 
+                        )}
+                        style={{ fontFamily: 'Arial, sans-serif' }}
+                        onClick={() => { if (!isActive) setActiveVoucherId(v.id); }}
+                      >
+                        {isActive && (
+                          <div className="absolute -top-3 -left-3 bg-emerald-500 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg z-20 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
+                            EN VIVO
+                          </div>
+                        )}
+                  {/* Header */}
                     <div className="text-center border-b border-stone-300 pb-0.5 mb-1 relative">
                       <h2 className="text-sm font-bold">CONSTRUVIVIENDA TECNOLOGICA S.A. DE C.V.</h2>
                       <p className="text-[7px] uppercase tracking-widest">HUIMANGUILLO TABASCO</p>
@@ -1948,7 +2121,15 @@ export default function App() {
                       <div className="absolute top-0 right-0 text-right">
                         <div className="flex items-center gap-1">
                           <span className="font-bold text-[8px]">FOLIO:</span>
-                          <span className="text-red-600 font-bold text-sm min-w-[40px] border-b border-stone-300">{v.header.folio}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.folio}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, folio: e.target.value.toUpperCase() } })}
+                              className="text-red-600 font-bold text-sm min-w-[40px] border-b border-stone-300 bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50 text-right w-16"
+                            />
+                          ) : (
+                            <span className="text-red-600 font-bold text-sm min-w-[40px] border-b border-stone-300">{v.header.folio}</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1957,34 +2138,90 @@ export default function App() {
                       <div className="col-span-8 space-y-1">
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-16 text-[9px] pb-0.5">OBRA:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.obra}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.obra}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, obra: e.target.value.toUpperCase() } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.obra}</span>
+                          )}
                         </div>
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-16 text-[9px] pb-0.5">PAQUETE:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.paquete}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.paquete}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, paquete: e.target.value.toUpperCase() } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.paquete}</span>
+                          )}
                         </div>
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-16 text-[9px] pb-0.5">FECHA:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.fecha}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.fecha}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, fecha: e.target.value } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.fecha}</span>
+                          )}
                         </div>
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-16 text-[8px] pb-0.5">DESTAJISTA:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.destajista}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.destajista}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, destajista: e.target.value.toUpperCase() } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.destajista}</span>
+                          )}
                         </div>
                       </div>
 
                       <div className="col-span-4 space-y-1">
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-20 text-[9px] pb-0.5">PROTOTIPO:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.prototipo}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.prototipo}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, prototipo: e.target.value.toUpperCase() } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.prototipo}</span>
+                          )}
                         </div>
                         <div className="flex items-end gap-2">
                           <span className="font-bold w-20 text-[9px] pb-0.5">UBICACIÓN:</span>
-                          <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.ubicacion}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.ubicacion}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, ubicacion: e.target.value.toUpperCase() } })}
+                              className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px] bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                            />
+                          ) : (
+                            <span className="border-b border-stone-300 flex-1 px-1 text-[9px] pb-0.5 min-h-[14px]">{v.header.ubicacion}</span>
+                          )}
                         </div>
                         <div className="mt-1 border border-stone-300 p-1 h-10 flex flex-col">
                           <span className="font-bold text-[7px] uppercase text-stone-400">CONCEPTO:</span>
-                          <span className="font-bold text-[8px] leading-tight flex-1 overflow-hidden">{v.header.concepto}</span>
+                          {isActive ? (
+                            <input 
+                              value={v.header.concepto}
+                              onChange={e => updateActiveVoucher({ header: { ...v.header, concepto: e.target.value.toUpperCase() } })}
+                              className="font-bold text-[8px] leading-tight flex-1 bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50 w-full"
+                            />
+                          ) : (
+                            <span className="font-bold text-[8px] leading-tight flex-1 overflow-hidden">{v.header.concepto}</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2005,9 +2242,45 @@ export default function App() {
                           {v.items.map((item, idx) => (
                             <tr key={idx} className="h-4">
                               <td className="border-x border-stone-50 px-1 py-0"></td>
-                              <td className="border-x border-stone-50 px-1 py-0.5 text-center text-[8px]">{item.unidad}</td>
-                              <td className="border-x border-stone-50 px-1 py-0.5 text-center font-bold text-[9px]">{item.cantidad}</td>
-                              <td className="border-x border-stone-50 px-1 py-0.5 uppercase text-[8px] leading-none whitespace-nowrap overflow-hidden">{item.descripcion}</td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 text-center text-[8px]">
+                                {isActive ? (
+                                  <input 
+                                    value={item.unidad}
+                                    onChange={e => {
+                                      const newItems = [...v.items];
+                                      newItems[idx] = { ...item, unidad: e.target.value.toUpperCase() };
+                                      updateActiveVoucher({ items: newItems });
+                                    }}
+                                    className="w-full text-center bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                                  />
+                                ) : item.unidad}
+                              </td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 text-center font-bold text-[9px]">
+                                {isActive ? (
+                                  <input 
+                                    value={item.cantidad}
+                                    onChange={e => {
+                                      const newItems = [...v.items];
+                                      newItems[idx] = { ...item, cantidad: e.target.value };
+                                      updateActiveVoucher({ items: newItems });
+                                    }}
+                                    className="w-full text-center font-bold bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                                  />
+                                ) : item.cantidad}
+                              </td>
+                              <td className="border-x border-stone-50 px-1 py-0.5 uppercase text-[8px] leading-none whitespace-nowrap overflow-hidden">
+                                {isActive ? (
+                                  <input 
+                                    value={item.descripcion}
+                                    onChange={e => {
+                                      const newItems = [...v.items];
+                                      newItems[idx] = { ...item, descripcion: e.target.value.toUpperCase() };
+                                      updateActiveVoucher({ items: newItems });
+                                    }}
+                                    className="w-full uppercase bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                                  />
+                                ) : item.descripcion}
+                              </td>
                               <td className="border-x border-stone-50 px-1 py-0"></td>
                               <td className="border-x border-stone-50 px-1 py-0"></td>
                             </tr>
@@ -2053,11 +2326,27 @@ export default function App() {
                     {/* Footer / Signatures */}
                     <div className="grid grid-cols-2 gap-12 px-12 mt-1">
                       <div className="text-center">
-                        <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.elaboro}</div>
+                        {isActive ? (
+                          <input 
+                            value={v.header.elaboro}
+                            onChange={e => updateActiveVoucher({ header: { ...v.header, elaboro: e.target.value.toUpperCase() } })}
+                            className="h-6 w-full text-center uppercase font-bold text-[8px] mb-0.5 bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                          />
+                        ) : (
+                          <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.elaboro}</div>
+                        )}
                         <div className="border-t border-stone-300 pt-0.5 font-bold uppercase text-[7px]">ELABORÓ:</div>
                       </div>
                       <div className="text-center">
-                        <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.autorizo}</div>
+                        {isActive ? (
+                          <input 
+                            value={v.header.autorizo}
+                            onChange={e => updateActiveVoucher({ header: { ...v.header, autorizo: e.target.value.toUpperCase() } })}
+                            className="h-6 w-full text-center uppercase font-bold text-[8px] mb-0.5 bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                          />
+                        ) : (
+                          <div className="h-6 flex items-end justify-center uppercase font-bold text-[8px] mb-0.5">{v.header.autorizo}</div>
+                        )}
                         <div className="border-t border-stone-300 pt-0.5 font-bold uppercase text-[7px]">AUTORIZÓ:</div>
                       </div>
                     </div>
@@ -2068,7 +2357,24 @@ export default function App() {
           </div>
         </div>
       </div>
-    </div>
+    ) : (
+      <div className="flex-1 flex items-center justify-center p-8 text-center bg-stone-50 h-full">
+        <div className="max-w-md space-y-4">
+          <div className="w-16 h-16 bg-stone-200 rounded-full flex items-center justify-center mx-auto mb-4">
+            <FileText className="text-stone-400" size={32} />
+          </div>
+          <h3 className="text-xl font-bold text-stone-800">No hay vales activos</h3>
+          <p className="text-stone-500 text-sm">Crea un nuevo vale para comenzar a capturar información.</p>
+          <button
+            onClick={() => handleAddVoucher()}
+            className="mt-6 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2 mx-auto"
+          >
+            <Plus size={18} />
+            Nuevo Vale
+          </button>
+        </div>
+      </div>
+    )}
   </div>
 )}
 
@@ -2380,8 +2686,7 @@ export default function App() {
                       {appUsers.map(user => (
                         <tr key={user.id} className="hover:bg-stone-50 transition-colors">
                           <td className="px-6 py-4 font-medium text-stone-800">{user.name}</td>
-                          <td className="px-6 py-4 text-stone-600 font-mono text-sm">{user.username}</td>
-                          <td className="px-6 py-4 text-stone-600 font-mono text-sm">{user.password || 'N/A'}</td>
+                          <td className="px-6 py-4 text-stone-600 font-mono text-sm">{user.email}</td>
                           <td className="px-6 py-4">
                             <span className={cn(
                               "px-3 py-1 rounded-full text-xs font-bold",
@@ -2393,13 +2698,19 @@ export default function App() {
                           <td className="px-6 py-4 text-stone-500 text-sm">{new Date(user.createdAt).toLocaleDateString()}</td>
                           <td className="px-6 py-4 text-right">
                             <button 
-                              onClick={() => setAppUsers(users => users.filter(u => u.id !== user.id))}
+                              onClick={async () => {
+                                try {
+                                  await deleteDoc(doc(db, 'users', user.id));
+                                } catch (error) {
+                                  handleFirestoreError(error, OperationType.DELETE, 'users');
+                                }
+                              }}
                               className={cn(
                                 "text-stone-400 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50",
-                                user.username === 'admin' && "opacity-50 cursor-not-allowed hover:text-stone-400 hover:bg-transparent"
+                                user.email === 'luciohernandez133@gmail.com' && "opacity-50 cursor-not-allowed hover:text-stone-400 hover:bg-transparent"
                               )}
-                              disabled={user.username === 'admin'}
-                              title={user.username === 'admin' ? "No se puede eliminar al administrador principal" : "Eliminar usuario"}
+                              disabled={user.email === 'luciohernandez133@gmail.com'}
+                              title={user.email === 'luciohernandez133@gmail.com' ? "No se puede eliminar al administrador principal" : "Eliminar usuario"}
                             >
                               <Trash2 size={18} />
                             </button>
@@ -2441,11 +2752,11 @@ export default function App() {
                 </div>
                 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-stone-500 uppercase">Nombre de Usuario</label>
+                  <label className="text-xs font-bold text-stone-500 uppercase">Usuario</label>
                   <input 
                     type="text" 
-                    value={newUser.username}
-                    onChange={e => setNewUser(u => ({ ...u, username: e.target.value }))}
+                    value={newUser.email?.replace('@construvivienda.local', '')}
+                    onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
                     placeholder="Ej. jperez"
                     className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                   />
@@ -2454,10 +2765,10 @@ export default function App() {
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-stone-500 uppercase">Contraseña</label>
                   <input 
-                    type="password" 
-                    value={newUser.password || ''}
+                    type="text" 
+                    value={newUser.password}
                     onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
-                    placeholder="••••••••"
+                    placeholder="Contraseña para el usuario"
                     className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
                   />
                 </div>
@@ -2483,21 +2794,46 @@ export default function App() {
                   Cancelar
                 </button>
                 <button 
-                  onClick={() => {
-                    if (newUser.name && newUser.username && newUser.password) {
-                      setAppUsers(users => [...users, {
-                        id: Date.now().toString(),
-                        name: newUser.name!,
-                        username: newUser.username!,
-                        password: newUser.password!,
+                  onClick={async () => {
+                    if (newUser.name && newUser.email && newUser.password) {
+                      const rawUsername = newUser.email.toLowerCase().trim();
+                      const userEmail = rawUsername.includes('@') ? rawUsername : `${rawUsername}@construvivienda.local`;
+                      
+                      const newUserData: AppUser = {
+                        id: userEmail,
+                        name: newUser.name,
+                        email: userEmail,
                         role: newUser.role as 'Administrador' | 'Capturista',
                         createdAt: new Date().toISOString()
-                      }]);
-                      setShowUserModal(false);
-                      setNewUser({ role: 'Capturista', name: '', username: '', password: '' });
+                      };
+                      try {
+                        // 1. Create in Firestore
+                        await setDoc(doc(db, 'users', userEmail), newUserData);
+                        
+                        // 2. Create in Firebase Auth using a secondary app to avoid logging out the admin
+                        const { initializeApp } = await import('firebase/app');
+                        const { getAuth, createUserWithEmailAndPassword } = await import('firebase/auth');
+                        const firebaseConfig = (await import('../firebase-applet-config.json')).default;
+                        
+                        const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp" + Date.now());
+                        const secondaryAuth = getAuth(secondaryApp);
+                        
+                        await createUserWithEmailAndPassword(secondaryAuth, userEmail, newUser.password);
+                        await secondaryAuth.signOut();
+                        
+                        setShowUserModal(false);
+                        setNewUser({ role: 'Capturista', name: '', email: '', password: '' });
+                      } catch (error: any) {
+                        if (error.code === 'auth/email-already-in-use') {
+                          alert('Este usuario ya existe en el sistema.');
+                        } else {
+                          console.error("Error creating user:", error);
+                          alert('Hubo un error al crear el usuario. Revisa la consola.');
+                        }
+                      }
                     }
                   }}
-                  disabled={!newUser.name || !newUser.username || !newUser.password}
+                  disabled={!newUser.name || !newUser.email || !newUser.password || newUser.password.length < 6}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-md"
                 >
                   Crear Usuario
