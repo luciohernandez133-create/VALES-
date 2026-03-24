@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/templates';
-import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus, LogOut } from 'lucide-react';
+import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus, LogOut, Save } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -159,6 +159,8 @@ export default function App() {
   const [vouchers, setVouchers] = useState<VoucherData[]>([]);
   const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>([]);
   const [activeVoucherId, setActiveVoucherId] = useState<string>('initial');
+  const [draftVoucher, setDraftVoucher] = useState<VoucherData | null>(null);
+  const [isDraftDirty, setIsDraftDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<'inicio' | 'captura' | 'reportes' | 'configuracion' | 'usuarios'>('inicio');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
@@ -239,10 +241,10 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'users', userEmail));
           if (userDoc.exists()) {
             setCurrentUser(userDoc.data() as AppUser);
-          } else if (userEmail === 'luciohernandez133@gmail.com' || userEmail === 'admin@construvivienda.local' || userEmail === 'administracion@construvivienda.local') {
+          } else if (userEmail === 'luciohernandez133@gmail.com' || userEmail === 'admin@construvivienda.local' || userEmail === 'administracion@construvivienda.local' || userEmail === 'admin_tsunami@construvivienda.local' || userEmail === 'admin_tsunami2@construvivienda.local') {
             const newAdmin: AppUser = {
               id: userEmail,
-              name: user.displayName || (userEmail.includes('administracion') ? 'Administración' : 'Administrador Principal'),
+              name: user.displayName || (userEmail.includes('administracion') || userEmail.includes('admin_tsunami') ? 'Administración' : 'Administrador Principal'),
               email: userEmail,
               role: 'Administrador',
               createdAt: new Date().toISOString()
@@ -394,8 +396,48 @@ export default function App() {
 
   const isGeneratingPDF = pdfProgress !== null;
 
-  const activeVoucher = vouchers.find(v => v.id === activeVoucherId) || vouchers[0];
+  const activeVoucher = draftVoucher || vouchers.find(v => v.id === activeVoucherId) || vouchers[0];
   const voucherRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
+  useEffect(() => {
+    if (!isDraftDirty) {
+      const selected = vouchers.find(v => v.id === activeVoucherId);
+      if (selected) {
+        setDraftVoucher(selected);
+      } else if (vouchers.length > 0) {
+        setDraftVoucher(vouchers[0]);
+        setActiveVoucherId(vouchers[0].id);
+      } else {
+        setDraftVoucher(null);
+      }
+    }
+  }, [activeVoucherId, vouchers, isDraftDirty]);
+
+  const handleSelectVoucher = (id: string) => {
+    if (isDraftDirty) {
+      if (!window.confirm('Tienes cambios sin guardar. ¿Deseas descartarlos?')) {
+        return;
+      }
+    }
+    setIsDraftDirty(false);
+    setActiveVoucherId(id);
+  };
+
+  const saveVoucher = async () => {
+    if (!draftVoucher) return;
+    if (isDuplicateVoucher) {
+      alert('No se puede guardar: Ya existe un vale con este paquete, ubicación y concepto.');
+      return;
+    }
+    
+    try {
+      await setDoc(doc(db, 'vouchers', draftVoucher.id), draftVoucher);
+      setIsDraftDirty(false);
+      alert('Vale guardado correctamente.');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'vouchers');
+    }
+  };
 
   useEffect(() => {
     if (conceptRef.current && activeVoucher) {
@@ -405,6 +447,12 @@ export default function App() {
   }, [activeVoucher?.header.concepto]);
 
   const handleAddVoucher = async (template?: VoucherTemplate) => {
+    if (isDraftDirty) {
+      if (!window.confirm('Tienes cambios sin guardar. ¿Deseas descartarlos?')) {
+        return;
+      }
+    }
+
     const newId = crypto.randomUUID();
     const targetTemplate = template || allTemplates[0];
     
@@ -436,19 +484,17 @@ export default function App() {
         folio: initialFolio,
         paquete: targetTemplate.id === 'empty' ? '' : targetTemplate.subConcepto,
         concepto: targetTemplate.id === 'empty' ? '' : targetTemplate.concepto,
-        fueraPresupuesto: false
+        fueraPresupuesto: false,
+        subConcepto: targetTemplate.id === 'empty' ? '' : ''
       },
       items: [...targetTemplate.items],
       createdAt: new Date().toISOString(),
       createdBy: currentUser?.email || 'unknown'
     };
     
-    try {
-      await setDoc(doc(db, 'vouchers', newId), newVoucher);
-      setActiveVoucherId(newId);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'vouchers');
-    }
+    setDraftVoucher(newVoucher);
+    setIsDraftDirty(true);
+    setActiveVoucherId(newId);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -518,59 +564,58 @@ export default function App() {
   };
 
   const handleRemoveVoucher = async (id: string) => {
-    if (vouchers.length === 1) return;
+    if (vouchers.length === 1 && !isDraftDirty) return;
     try {
       await deleteDoc(doc(db, 'vouchers', id));
       if (activeVoucherId === id) {
-        setActiveVoucherId(vouchers.find(v => v.id !== id)?.id || 'initial');
+        const nextVoucher = vouchers.find(v => v.id !== id);
+        setActiveVoucherId(nextVoucher?.id || 'initial');
+        setIsDraftDirty(false);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'vouchers');
     }
   };
 
-  const updateActiveVoucher = async (updates: Partial<VoucherData>) => {
+  const updateActiveVoucher = (updates: Partial<VoucherData>) => {
     if (!activeVoucher) return;
-    try {
-      await updateDoc(doc(db, 'vouchers', activeVoucher.id), updates);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, 'vouchers');
-    }
+    setDraftVoucher({ ...activeVoucher, ...updates } as VoucherData);
+    setIsDraftDirty(true);
   };
 
-  const updateItem = async (index: number, field: keyof VoucherItem, value: string | number) => {
+  const updateItem = (index: number, field: keyof VoucherItem, value: string | number) => {
     if (!activeVoucher) return;
     const newItems = [...activeVoucher.items];
     newItems[index] = { ...newItems[index], [field]: value } as VoucherItem;
-    await updateActiveVoucher({ items: newItems });
+    updateActiveVoucher({ items: newItems });
   };
 
-  const addItem = async () => {
+  const addItem = () => {
     if (!activeVoucher) return;
-    await updateActiveVoucher({ 
+    updateActiveVoucher({ 
       items: [...activeVoucher.items, { unidad: 'PZA', cantidad: 1, descripcion: '' }] 
     });
   };
 
-  const removeItem = async (index: number) => {
+  const removeItem = (index: number) => {
     if (!activeVoucher) return;
-    await updateActiveVoucher({ 
+    updateActiveVoucher({ 
       items: activeVoucher.items.filter((_, i) => i !== index) 
     });
   };
 
-  const handleTemplateChange = async (value: string) => {
+  const handleTemplateChange = (value: string) => {
     const template = allTemplates.find(t => t.subConcepto === value || t.concepto === value || t.id === value);
     if (template && activeVoucher) {
-      await updateActiveVoucher({ 
+      updateActiveVoucher({ 
         templateId: template.id, 
-        header: { ...activeVoucher.header, concepto: template.concepto },
+        header: { ...activeVoucher.header, concepto: template.concepto, subConcepto: template.id === 'empty' ? '' : '' },
         items: template.items 
       });
     } else if (activeVoucher) {
-      await updateActiveVoucher({
+      updateActiveVoucher({
         templateId: 'empty',
-        header: { ...activeVoucher.header, concepto: value }
+        header: { ...activeVoucher.header, concepto: value, subConcepto: '' }
       });
     }
   };
@@ -1230,6 +1275,19 @@ export default function App() {
     );
   }, [activeVoucher?.header.paquete, activeVoucher?.header.ubicacion, activeVoucher?.templateId, activeVoucher?.id, vouchers]);
 
+  const displayVouchers = useMemo(() => {
+    const list = [...vouchers];
+    if (draftVoucher) {
+      const idx = list.findIndex(v => v.id === draftVoucher.id);
+      if (idx >= 0) {
+        list[idx] = draftVoucher;
+      } else {
+        list.push(draftVoucher);
+      }
+    }
+    return list;
+  }, [vouchers, draftVoucher]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -1237,18 +1295,40 @@ export default function App() {
       setLoginError('Por favor ingresa usuario y contraseña');
       return;
     }
-    const emailToUse = loginEmail.includes('@') ? loginEmail : `${loginEmail.toLowerCase().trim()}@construvivienda.local`;
+    
+    const normalizedEmail = loginEmail.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const trimmedPassword = loginPassword.trim();
+    
+    let emailToUse = normalizedEmail.includes('@') ? normalizedEmail : `${normalizedEmail}@construvivienda.local`;
+    let passwordToUse = loginPassword;
+    
+    // Hardcoded bypass for the specific user request
+    if ((normalizedEmail === 'administracion' || normalizedEmail === 'administracion@construvivienda.local') && trimmedPassword === 'tsunami123') {
+      emailToUse = 'admin_tsunami2@construvivienda.local';
+      passwordToUse = 'tsunami123';
+    }
     
     try {
-      await signInWithEmailAndPassword(auth, emailToUse, loginPassword);
+      await signInWithEmailAndPassword(auth, emailToUse, passwordToUse);
     } catch (error: any) {
-      if (emailToUse === 'administracion@construvivienda.local' || emailToUse === 'admin@construvivienda.local') {
+      const isAdminEmail = emailToUse === 'administracion@construvivienda.local' || 
+                           emailToUse === 'admin@construvivienda.local' || 
+                           emailToUse === 'admin_tsunami@construvivienda.local' || 
+                           emailToUse === 'admin_tsunami2@construvivienda.local';
+      
+      if (!isAdminEmail) {
+        console.error("Login error:", error);
+      }
+
+      if (isAdminEmail) {
         try {
           const { createUserWithEmailAndPassword } = await import('firebase/auth');
-          await createUserWithEmailAndPassword(auth, emailToUse, loginPassword);
+          await createUserWithEmailAndPassword(auth, emailToUse, passwordToUse);
           return;
         } catch (e: any) {
-          console.error("Auto-create error:", e);
+          if (e.code !== 'auth/email-already-in-use') {
+            console.error("Auto-create error:", e);
+          }
           if (e.code === 'auth/operation-not-allowed') {
             setLoginError('Error: El inicio de sesión con Usuario/Contraseña no está activado en Firebase. Debes activarlo en la consola.');
             return;
@@ -1258,13 +1338,18 @@ export default function App() {
             return;
           }
           if (e.code === 'auth/email-already-in-use') {
-            setLoginError('La contraseña es incorrecta. Como es un correo local (.local), no puedes recuperar la contraseña. Por favor, intenta ingresar con el usuario "admin" y una contraseña nueva, o elimina el usuario desde la consola de Firebase.');
+            setLoginError(`Error de credenciales (${error.code}). Si cambiaste la contraseña, usa la nueva. Si no, contacta soporte.`);
             return;
           }
-          // Fall through for other errors
+          setLoginError(`Error al crear usuario: ${e.message}`);
+          return;
         }
       }
-      setLoginError('Usuario o contraseña incorrectos. Si eres nuevo, pide al administrador que te cree una cuenta.');
+      if (error.code === 'auth/network-request-failed') {
+        setLoginError('Error de red. Por favor revisa tu conexión a internet o desactiva tu bloqueador de anuncios (AdBlock, Brave Shields) que podría estar bloqueando el inicio de sesión.');
+        return;
+      }
+      setLoginError(`Usuario o contraseña incorrectos (${error.code}). Si eres nuevo, pide al administrador que te cree una cuenta.`);
     }
   };
 
@@ -1773,16 +1858,30 @@ export default function App() {
               {/* Vales Activos Tabs */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold text-stone-400 uppercase tracking-widest">
-                  <span>Vales Activos ({vouchers.length})</span>
-                  <button onClick={() => handleAddVoucher()} className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg transition-colors">
-                    <Plus size={14} /> Nuevo Vale
-                  </button>
+                  <span>Vales Activos ({displayVouchers.length})</span>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={saveVoucher} 
+                      disabled={!isDraftDirty || isDuplicateVoucher}
+                      className={cn(
+                        "flex items-center gap-1 px-3 py-1.5 rounded-lg transition-colors font-bold",
+                        isDraftDirty && !isDuplicateVoucher
+                          ? "bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-900/20" 
+                          : "bg-stone-200 text-stone-400 cursor-not-allowed"
+                      )}
+                    >
+                      <Save size={14} /> Guardar
+                    </button>
+                    <button onClick={() => handleAddVoucher()} className="text-emerald-600 hover:text-emerald-700 flex items-center gap-1 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors font-bold">
+                      <Plus size={14} /> Nuevo Vale
+                    </button>
+                  </div>
                 </div>
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                  {vouchers.map((v, idx) => (
+                  {displayVouchers.map((v, idx) => (
                     <div key={v.id} className="relative group flex-shrink-0">
                       <button
-                        onClick={() => setActiveVoucherId(v.id)}
+                        onClick={() => handleSelectVoucher(v.id)}
                         className={cn(
                           "px-4 py-2 rounded-xl text-sm font-bold transition-all border-2",
                           activeVoucherId === v.id 
@@ -2091,7 +2190,7 @@ export default function App() {
                 </div>
                 
                 <div className="w-full overflow-y-auto flex flex-col items-center bg-stone-100/50 rounded-lg p-2 md:p-4 border border-stone-200 shadow-inner max-h-[calc(100vh-12rem)] gap-6" id="preview-area-container">
-                  {vouchers.sort((a, b) => (a.id === activeVoucherId ? -1 : b.id === activeVoucherId ? 1 : 0)).map((v) => {
+                  {displayVouchers.sort((a, b) => (a.id === activeVoucherId ? -1 : b.id === activeVoucherId ? 1 : 0)).map((v) => {
                     const template = allTemplates.find(t => t.id === v.templateId) || allTemplates[0];
                     const isActive = v.id === activeVoucherId;
                     
@@ -2315,7 +2414,16 @@ export default function App() {
                             <td className="border-x border-stone-50" colSpan={4}></td>
                             <td className="border-x border-stone-50" colSpan={2} align="center">
                               <div className="text-[7px] font-bold uppercase leading-tight px-1 whitespace-pre-wrap">
-                                {template.subConcepto}
+                                {isActive && template.id === 'empty' ? (
+                                  <input 
+                                    value={v.header.subConcepto !== undefined ? v.header.subConcepto : template.subConcepto}
+                                    onChange={e => updateActiveVoucher({ header: { ...v.header, subConcepto: e.target.value.toUpperCase() } })}
+                                    className="w-full text-center bg-transparent outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                                    placeholder="SUBCONCEPTO"
+                                  />
+                                ) : (
+                                  v.header.subConcepto || template.subConcepto
+                                )}
                               </div>
                             </td>
                           </tr>

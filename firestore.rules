@@ -56,6 +56,8 @@ service cloud.firestore {
          get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'Administrador') ||
         (request.auth.token.email == "luciohernandez133@gmail.com" && request.auth.token.email_verified == true) ||
         (request.auth.token.email == "administracion@construvivienda.local") ||
+        (request.auth.token.email == "admin_tsunami@construvivienda.local") ||
+        (request.auth.token.email == "admin_tsunami2@construvivienda.local") ||
         (request.auth.token.email == "admin@construvivienda.local")
       );
     }
@@ -112,7 +114,7 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       
       // Only admins can create/update users, OR the default admin can create themselves
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(email) && (request.auth.token.email == "luciohernandez133@gmail.com" || request.auth.token.email == "administracion@construvivienda.local" || request.auth.token.email == "admin@construvivienda.local")));
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(email) && (request.auth.token.email == "luciohernandez133@gmail.com" || request.auth.token.email == "administracion@construvivienda.local" || request.auth.token.email == "admin_tsunami@construvivienda.local" || request.auth.token.email == "admin_tsunami2@construvivienda.local" || request.auth.token.email == "admin@construvivienda.local")));
       allow update: if isAuthenticated() && isValidUser(request.resource.data) && isAdmin();
       allow delete: if isAdmin() && !isOwner(email); // Cannot delete self
     }
