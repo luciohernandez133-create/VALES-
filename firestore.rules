@@ -113,7 +113,7 @@ service cloud.firestore {
     }
 
     function isValidBudget(data) {
-      return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'unidad', 'cantidadPresupuesto', 'salidas', 'saldoTotal', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'unidad', 'cantidadPresupuesto', 'salidas', 'saldoTotal']) &&
              data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
              data.paquete is string && data.paquete.size() < 200 &&
              data.ubicacion is string && data.ubicacion.size() < 200 &&
@@ -123,7 +123,7 @@ service cloud.firestore {
              data.cantidadPresupuesto is number &&
              data.salidas is number &&
              data.saldoTotal is number &&
-             data.createdAt is string;
+             (!('createdAt' in data) || data.createdAt is string);
     }
 
     // ===============================================================

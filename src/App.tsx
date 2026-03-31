@@ -677,6 +677,8 @@ export default function App() {
 
       let finalVoucher = { 
         ...draftVoucher,
+        createdAt: draftVoucher.createdAt || new Date().toISOString(),
+        createdBy: draftVoucher.createdBy || currentUser?.email || 'unknown',
         items: draftVoucher.items.filter(item => item.descripcion !== 'MATERIAL FUERA DE PPTO')
       };
 
