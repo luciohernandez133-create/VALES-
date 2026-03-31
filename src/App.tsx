@@ -2114,11 +2114,17 @@ export default function App() {
       return;
     }
     
-    const normalizedEmail = loginEmail.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const normalizedEmail = loginEmail.toLowerCase().trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '');
     const trimmedPassword = loginPassword.trim();
     
     let emailToUse = normalizedEmail.includes('@') ? normalizedEmail : `${normalizedEmail}@construvivienda.local`;
     let passwordToUse = loginPassword;
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailToUse)) {
+      setLoginError('El usuario o correo no es válido.');
+      return;
+    }
     
     // Hardcoded bypass for the specific user request
     if (normalizedEmail === 'administracion' || normalizedEmail === 'administracion@construvivienda.local') {
@@ -4224,7 +4230,7 @@ export default function App() {
                   <input 
                     type="text" 
                     value={newUser.email?.replace('@construvivienda.local', '')}
-                    onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
+                    onChange={e => setNewUser(u => ({ ...u, email: e.target.value.replace(/\s+/g, '') }))}
                     placeholder="Ej. jperez"
                     disabled={isEditingUser}
                     className={cn(
@@ -4267,9 +4273,15 @@ export default function App() {
                 </button>
                 <button 
                   onClick={async () => {
-                    if (newUser.name && newUser.email && newUser.password) {
-                      const rawUsername = newUser.email.toLowerCase().trim();
+                    if (newUser.name && newUser.email && newUser.email.trim() !== '' && newUser.password) {
+                      const rawUsername = newUser.email.toLowerCase().trim().replace(/\s+/g, '');
                       const userEmail = rawUsername.includes('@') ? rawUsername : `${rawUsername}@construvivienda.local`;
+                      
+                      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                      if (!emailRegex.test(userEmail)) {
+                        alert('El nombre de usuario o correo no es válido.');
+                        return;
+                      }
                       
                       try {
                         if (isEditingUser && newUser.id) {
@@ -4314,7 +4326,7 @@ export default function App() {
                       }
                     }
                   }}
-                  disabled={!newUser.name || !newUser.email || !newUser.password || newUser.password.length < 6}
+                  disabled={!newUser.name || !newUser.email || newUser.email.trim() === '' || !newUser.password || newUser.password.length < 6}
                   className="bg-black hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-6 py-2 rounded-xl text-sm font-bold transition-all shadow-md"
                 >
                   {isEditingUser ? 'Guardar Cambios' : 'Crear Usuario'}
