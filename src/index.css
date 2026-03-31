@@ -43,12 +43,30 @@
      ========================================== */
   
   /* Colores del Menú Lateral (Sidebar) */
-  --color-sidebar-bg: #11101D;          /* Fondo oscuro del menú */
-  --color-sidebar-hover: #1d1b31;       /* Color al pasar el mouse */
-  --color-sidebar-active: #ffffff;      /* Fondo del botón activo */
-  --color-sidebar-text: #ffffff;        /* Color del texto normal */
-  --color-sidebar-text-active: #11101D; /* Color del texto activo */
+  --color-sidebar-bg: #ffffff;          /* Blanco */
+  --color-sidebar-hover: #f3f4f6;       /* Gris claro hover */
+  --color-sidebar-active: #111827;      /* Gris muy oscuro */
+  --color-sidebar-text: #6b7280;        /* Gris medio texto */
+  --color-sidebar-text-active: #ffffff; /* Texto blanco sobre activo */
   
   /* Colores de la Aplicación */
-  --color-app-bg: #f3f4f6;              /* Fondo general de la app */
+  --color-app-bg: #eff6ff;              /* Fondo azul pastel */
+  --color-text-primary: #111827;        /* Gris muy oscuro */
+  --color-text-secondary: #6b7280;      /* Gris medio */
+  --color-accent-cyan: #374151;         /* Gris oscuro para acentos */
+  --color-line: #e5e7eb;                /* Líneas sutiles */
+}
+
+.dark {
+  --color-sidebar-bg: #111827;
+  --color-sidebar-hover: #1f2937;
+  --color-sidebar-active: #374151;
+  --color-sidebar-text: #9ca3af;
+  --color-sidebar-text-active: #ffffff;
+  
+  --color-app-bg: #030712;
+  --color-text-primary: #f9fafb;
+  --color-text-secondary: #9ca3af;
+  --color-accent-cyan: #d1d5db;
+  --color-line: #374151;
 }

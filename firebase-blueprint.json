@@ -95,6 +95,24 @@
         }
       },
       "required": ["destajistas", "elaboroList", "autorizoList"]
+    },
+    "Budget": {
+      "title": "Budget",
+      "description": "Budget item for inventory tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "paquete": { "type": "string" },
+        "ubicacion": { "type": "string" },
+        "concepto": { "type": "string" },
+        "material": { "type": "string" },
+        "unidad": { "type": "string" },
+        "cantidadPresupuesto": { "type": "number" },
+        "salidas": { "type": "number" },
+        "saldoTotal": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "paquete", "ubicacion", "concepto", "material", "unidad", "cantidadPresupuesto", "salidas", "saldoTotal", "createdAt"]
     }
   },
   "firestore": {
@@ -113,6 +131,10 @@
     "/settings/lists": {
       "schema": { "$ref": "#/entities/SettingsLists" },
       "description": "Stores global lists for dropdowns"
+    },
+    "/budgets/{budgetId}": {
+      "schema": { "$ref": "#/entities/Budget" },
+      "description": "Stores budget items for inventory"
     }
   }
 }

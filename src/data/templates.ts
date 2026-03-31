@@ -9,6 +9,7 @@ export interface VoucherTemplate {
   concepto: string;
   subConcepto: string;
   items: VoucherItem[];
+  paquete?: string;
 }
 
 export const VOUCHER_TEMPLATES: VoucherTemplate[] = [

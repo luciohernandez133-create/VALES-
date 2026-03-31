@@ -58,6 +58,7 @@ service cloud.firestore {
         (request.auth.token.email == "administracion@construvivienda.local") ||
         (request.auth.token.email == "admin_tsunami@construvivienda.local") ||
         (request.auth.token.email == "admin_tsunami2@construvivienda.local") ||
+        (request.auth.token.email == "admin_tsunami3@construvivienda.local") ||
         (request.auth.token.email == "admin@construvivienda.local")
       );
     }
@@ -83,11 +84,13 @@ service cloud.firestore {
     }
 
     function isValidVoucher(data) {
-      return data.keys().hasAll(['id', 'templateId', 'header', 'items']) &&
+      return data.keys().hasAll(['id', 'templateId', 'header', 'items', 'createdAt', 'createdBy']) &&
              data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
              data.templateId is string && data.templateId.size() > 0 && data.templateId.size() < 100 &&
              data.header is map &&
-             data.items is list && data.items.size() <= 200;
+             data.items is list && data.items.size() <= 1000 &&
+             data.createdAt is string &&
+             data.createdBy is string;
     }
 
     function isValidTemplate(data) {
@@ -95,14 +98,32 @@ service cloud.firestore {
              data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
              data.concepto is string && data.concepto.size() > 0 && data.concepto.size() < 200 &&
              data.subConcepto is string && data.subConcepto.size() < 200 &&
-             data.items is list && data.items.size() <= 200;
+             data.items is list && data.items.size() <= 1000 &&
+             (!('paquete' in data) || data.paquete is string) &&
+             (!('prototipo' in data) || data.prototipo is string);
     }
 
     function isValidSettingsLists(data) {
-      return data.keys().hasAll(['destajistas', 'elaboroList', 'autorizoList']) &&
-             data.destajistas is list && data.destajistas.size() <= 1000 &&
-             data.elaboroList is list && data.elaboroList.size() <= 1000 &&
-             data.autorizoList is list && data.autorizoList.size() <= 1000;
+      return data.keys().hasAll(['destajistas', 'elaboroList', 'autorizoList', 'packagesList', 'customLocations']) &&
+             data.destajistas is list && data.destajistas.size() <= 2000 &&
+             data.elaboroList is list && data.elaboroList.size() <= 2000 &&
+             data.autorizoList is list && data.autorizoList.size() <= 2000 &&
+             data.packagesList is list &&
+             data.customLocations is map;
+    }
+
+    function isValidBudget(data) {
+      return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'unidad', 'cantidadPresupuesto', 'salidas', 'saldoTotal', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.paquete is string && data.paquete.size() < 200 &&
+             data.ubicacion is string && data.ubicacion.size() < 200 &&
+             data.concepto is string && data.concepto.size() < 200 &&
+             data.material is string && data.material.size() < 200 &&
+             data.unidad is string && data.unidad.size() < 100 &&
+             data.cantidadPresupuesto is number &&
+             data.salidas is number &&
+             data.saldoTotal is number &&
+             data.createdAt is string;
     }
 
     // ===============================================================
@@ -114,7 +135,7 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       
       // Only admins can create/update users, OR the default admin can create themselves
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(email) && (request.auth.token.email == "luciohernandez133@gmail.com" || request.auth.token.email == "administracion@construvivienda.local" || request.auth.token.email == "admin_tsunami@construvivienda.local" || request.auth.token.email == "admin_tsunami2@construvivienda.local" || request.auth.token.email == "admin@construvivienda.local")));
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(email) && (request.auth.token.email == "luciohernandez133@gmail.com" || request.auth.token.email == "administracion@construvivienda.local" || request.auth.token.email == "admin_tsunami@construvivienda.local" || request.auth.token.email == "admin_tsunami2@construvivienda.local" || request.auth.token.email == "admin_tsunami3@construvivienda.local" || request.auth.token.email == "admin@construvivienda.local")));
       allow update: if isAuthenticated() && isValidUser(request.resource.data) && isAdmin();
       allow delete: if isAdmin() && !isOwner(email); // Cannot delete self
     }
@@ -138,6 +159,13 @@ service cloud.firestore {
       allow create: if isAdmin() && docId == 'lists' && isValidSettingsLists(request.resource.data);
       allow update: if isAdmin() && docId == 'lists' && isValidSettingsLists(request.resource.data);
       allow delete: if false;
+    }
+
+    match /budgets/{budgetId} {
+      allow read: if isCapturistaOrAdmin();
+      allow create: if isAdmin() && isValidBudget(request.resource.data);
+      allow update: if isCapturistaOrAdmin() && isValidBudget(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }
