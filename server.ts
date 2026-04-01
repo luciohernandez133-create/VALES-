@@ -14,6 +14,19 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(cors());
 
+  // Error handling middleware for JSON parsing errors
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
+      console.error('JSON Parsing Error:', err.message);
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+    if (err.type === 'entity.too.large') {
+      console.error('Payload Too Large:', err.message);
+      return res.status(413).json({ error: 'Payload too large' });
+    }
+    next(err);
+  });
+
   // Google Sheets Auth
   // Note: User needs to provide GOOGLE_SERVICE_ACCOUNT_KEY (JSON string) 
   // and GOOGLE_SPREADSHEET_ID in their environment variables.
