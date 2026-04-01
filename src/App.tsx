@@ -745,10 +745,27 @@ export default function App() {
           });
           
           if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Error al sincronizar con Google Sheets");
+            let errorMessage = `Error del servidor: ${response.status} ${response.statusText}`;
+            try {
+              const text = await response.text();
+              try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.error || errorMessage;
+              } catch (e) {
+                errorMessage += ` - ${text.substring(0, 100)}`;
+              }
+            } catch (e) {
+              // Ignore
+            }
+            throw new Error(errorMessage);
           }
-          responseData = await response.json();
+          
+          try {
+            const text = await response.text();
+            responseData = JSON.parse(text);
+          } catch (e) {
+            throw new Error("Respuesta inválida del servidor (no es JSON)");
+          }
         }
 
         // Process results to split voucher if needed
@@ -1245,16 +1262,39 @@ export default function App() {
             });
             
             if (!response.ok) {
-              const errorData = await response.json();
-              console.warn("Google Sheets Sync Warning:", errorData.error);
+              let errorMessage = `Error del servidor: ${response.status} ${response.statusText}`;
+              try {
+                const text = await response.text();
+                try {
+                  const errorData = JSON.parse(text);
+                  errorMessage = errorData.error || errorMessage;
+                } catch (e) {
+                  errorMessage += ` - ${text.substring(0, 100)}`;
+                }
+              } catch (e) {
+                // Ignore
+              }
+              console.warn("Google Sheets Sync Warning:", errorMessage);
               setAlertModal({ 
                 isOpen: true, 
-                message: `Vale eliminado en la base de datos, pero hubo un problema al actualizar Google Sheets:\n${errorData.error}` 
+                message: `Vale eliminado en la base de datos, pero hubo un problema al actualizar Google Sheets:\n${errorMessage}` 
               });
               return;
             }
 
-            const responseData = await response.json();
+            let responseData: any = null;
+            try {
+              const text = await response.text();
+              responseData = JSON.parse(text);
+            } catch (e) {
+              console.warn("Google Sheets Sync Warning: Respuesta inválida del servidor");
+              setAlertModal({ 
+                isOpen: true, 
+                message: `Vale eliminado en la base de datos, pero hubo un problema al actualizar Google Sheets:\nRespuesta inválida del servidor (no es JSON)` 
+              });
+              return;
+            }
+            
             if (responseData.notFound && responseData.notFound.length > 0) {
               hasNotFound = true;
               const missingItems = responseData.notFound.map((item: any) => 

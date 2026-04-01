@@ -11,7 +11,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
   app.use(cors());
 
   // Google Sheets Auth
@@ -495,8 +495,12 @@ async function startServer() {
         results: adjustmentResults
       });
     } catch (error: any) {
-      console.error("Error updating Google Sheet:", error.response?.data || error.message);
-      res.status(500).json({ error: error.response?.data?.error?.message || error.message });
+      console.error("Error updating Google Sheet:", error.message);
+      try {
+        res.status(500).json({ error: error.message || "Error interno del servidor" });
+      } catch (e) {
+        res.status(500).send("Error interno del servidor");
+      }
     }
   });
 

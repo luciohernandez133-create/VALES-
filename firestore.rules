@@ -113,13 +113,13 @@ service cloud.firestore {
     }
 
     function isValidBudget(data) {
-      return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'unidad', 'cantidadPresupuesto', 'salidas', 'saldoTotal']) &&
+      return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'cantidadPresupuesto', 'salidas', 'saldoTotal']) &&
              data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
              data.paquete is string && data.paquete.size() < 200 &&
              data.ubicacion is string && data.ubicacion.size() < 200 &&
              data.concepto is string && data.concepto.size() < 200 &&
              data.material is string && data.material.size() < 200 &&
-             data.unidad is string && data.unidad.size() < 100 &&
+             (!('unidad' in data) || (data.unidad is string && data.unidad.size() < 100)) &&
              data.cantidadPresupuesto is number &&
              data.salidas is number &&
              data.saldoTotal is number &&
