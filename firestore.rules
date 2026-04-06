@@ -51,10 +51,10 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
+      return isAuthenticated() && request.auth.token.email != null && (
         (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
          get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'Administrador') ||
-        (request.auth.token.email == "luciohernandez133@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "luciohernandez133@gmail.com") ||
         (request.auth.token.email == "administracion@construvivienda.local") ||
         (request.auth.token.email == "admin_tsunami@construvivienda.local") ||
         (request.auth.token.email == "admin_tsunami2@construvivienda.local") ||
@@ -66,7 +66,7 @@ service cloud.firestore {
     function isCapturistaOrAdmin() {
       return isAuthenticated() && (
         isAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
+        (request.auth.token.email != null && exists(/databases/$(database)/documents/users/$(request.auth.token.email)) &&
          get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'Capturista')
       );
     }
@@ -77,49 +77,49 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.keys().hasAll(['name', 'email', 'role', 'createdAt']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.name is string &&
+             data.email is string &&
              data.role in ['Administrador', 'Capturista'] &&
              data.createdAt is string;
     }
 
     function isValidVoucher(data) {
       return data.keys().hasAll(['id', 'templateId', 'header', 'items', 'createdAt', 'createdBy']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
-             data.templateId is string && data.templateId.size() > 0 && data.templateId.size() < 100 &&
+             data.id is string &&
+             data.templateId is string &&
              data.header is map &&
-             data.items is list && data.items.size() <= 1000 &&
+             data.items is list &&
              data.createdAt is string &&
              data.createdBy is string;
     }
 
     function isValidTemplate(data) {
       return data.keys().hasAll(['id', 'concepto', 'subConcepto', 'items']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
-             data.concepto is string && data.concepto.size() > 0 && data.concepto.size() < 200 &&
-             data.subConcepto is string && data.subConcepto.size() < 200 &&
-             data.items is list && data.items.size() <= 1000 &&
+             data.id is string &&
+             data.concepto is string &&
+             data.subConcepto is string &&
+             data.items is list &&
              (!('paquete' in data) || data.paquete is string) &&
              (!('prototipo' in data) || data.prototipo is string);
     }
 
     function isValidSettingsLists(data) {
       return data.keys().hasAll(['destajistas', 'elaboroList', 'autorizoList', 'packagesList', 'customLocations']) &&
-             data.destajistas is list && data.destajistas.size() <= 2000 &&
-             data.elaboroList is list && data.elaboroList.size() <= 2000 &&
-             data.autorizoList is list && data.autorizoList.size() <= 2000 &&
+             data.destajistas is list &&
+             data.elaboroList is list &&
+             data.autorizoList is list &&
              data.packagesList is list &&
              data.customLocations is map;
     }
 
     function isValidBudget(data) {
       return data.keys().hasAll(['id', 'paquete', 'ubicacion', 'concepto', 'material', 'cantidadPresupuesto', 'salidas', 'saldoTotal']) &&
-             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
-             data.paquete is string && data.paquete.size() < 200 &&
-             data.ubicacion is string && data.ubicacion.size() < 200 &&
-             data.concepto is string && data.concepto.size() < 200 &&
-             data.material is string && data.material.size() < 200 &&
-             (!('unidad' in data) || (data.unidad is string && data.unidad.size() < 100)) &&
+             data.id is string &&
+             data.paquete is string &&
+             data.ubicacion is string &&
+             data.concepto is string &&
+             data.material is string &&
+             (!('unidad' in data) || data.unidad is string) &&
              data.cantidadPresupuesto is number &&
              data.salidas is number &&
              data.saldoTotal is number &&

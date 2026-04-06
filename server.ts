@@ -14,6 +14,11 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(cors());
 
+  // Health check route
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // Error handling middleware for JSON parsing errors
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err instanceof SyntaxError && 'status' in err && err.status === 400 && 'body' in err) {
