@@ -2045,25 +2045,57 @@ export default function App() {
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws) as any[];
+        
+        // 1. Find the actual header row (in case there are titles/empty rows at the top)
+        const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        let headerRowIdx = 0;
+        
+        const normalizeKeyStr = (k: any) => String(k || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        
+        for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
+          const row = rawRows[i] || [];
+          const normalizedRow = row.map(normalizeKeyStr);
+          if (normalizedRow.some(k => ['material', 'descripcion', 'insumo', 'articulo', 'producto'].includes(k))) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+
+        // 2. Parse data starting from the detected header row
+        const data = XLSX.utils.sheet_to_json(ws, { range: headerRowIdx }) as any[];
 
         if (data.length === 0) {
-          alert("El archivo está vacío.");
+          alert("El archivo está vacío o no se pudo leer correctamente.");
           setIsUploadingTemplates(false);
           return;
         }
+
+        // Helper to get value using normalized keys
+        const getValue = (row: any, possibleKeys: string[]) => {
+          const rowKeys = Object.keys(row);
+          const normalizedPossibleKeys = possibleKeys.map(normalizeKeyStr);
+          
+          for (const key of rowKeys) {
+            const normKey = normalizeKeyStr(key);
+            if (normalizedPossibleKeys.includes(normKey)) {
+              return row[key];
+            }
+          }
+          return undefined;
+        };
 
         // Group items by Concepto + SubConcepto
         const grouped: Record<string, any> = {};
         
         data.forEach(row => {
-          const concepto = String(row.Concepto || row.concepto || 'SIN CONCEPTO').trim();
-          const subConcepto = String(row.SubConcepto || row.subConcepto || row.Subconcepto || 'SIN SUBCONCEPTO').trim();
-          const paquete = String(row.Paquete || row.paquete || '').trim();
-          const prototipo = String(row.Prototipo || row.prototipo || '').trim();
+          const concepto = String(getValue(row, ['Concepto', 'Partida', 'Actividad']) || 'SIN CONCEPTO').trim();
+          const subConcepto = String(getValue(row, ['SubConcepto', 'SubPartida', 'SubActividad']) || 'SIN SUBCONCEPTO').trim();
+          const paquete = String(getValue(row, ['Paquete', 'Lote', 'Etapa']) || '').trim();
+          const prototipo = String(getValue(row, ['Prototipo', 'Modelo']) || '').trim();
           
-          const material = String(row.Material || row.material || row.Descripcion || row.descripcion || '').trim();
-          if (material && material !== 'MATERIAL FUERA DE PPTO') {
+          const material = String(getValue(row, ['Material', 'Descripcion', 'Insumo', 'Articulo', 'Producto']) || '').trim();
+          
+          if (material && material !== 'MATERIAL FUERA DE PPTO' && material !== 'undefined') {
             const key = `${concepto}|${subConcepto}`;
             if (!grouped[key]) {
               grouped[key] = {
@@ -2075,10 +2107,12 @@ export default function App() {
               };
             }
             
+            const rawCantidad = getValue(row, ['Cantidad', 'Cant', 'Volumen']);
+            
             grouped[key].items.push({
               descripcion: material,
-              unidad: String(row.Unidad || row.unidad || ''),
-              cantidad: parseFloat(row.Cantidad || row.cantidad || 0) || 0
+              unidad: String(getValue(row, ['Unidad', 'UM', 'Medida', 'U']) || '').trim(),
+              cantidad: parseFloat(String(rawCantidad).replace(/[^0-9.-]+/g, "")) || 0
             });
           }
         });
@@ -2099,7 +2133,8 @@ export default function App() {
             setIsUploadingTemplates(false);
           });
         } else {
-          alert("No se encontraron plantillas válidas en el archivo. Asegúrate de que las columnas tengan los nombres correctos (Concepto, SubConcepto, Material, Unidad, Cantidad).");
+          const detectedCols = data.length > 0 ? Object.keys(data[0]).slice(0, 10).join(", ") : "Ninguna";
+          alert(`No se encontraron plantillas válidas.\n\nColumnas detectadas en tu archivo:\n${detectedCols}\n\nAsegúrate de incluir al menos una columna llamada "Descripcion" o "Material".`);
           setIsUploadingTemplates(false);
         }
       } catch (error) {
