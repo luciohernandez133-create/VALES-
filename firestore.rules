@@ -109,7 +109,8 @@ service cloud.firestore {
              data.elaboroList is list &&
              data.autorizoList is list &&
              data.packagesList is list &&
-             data.customLocations is map;
+             data.customLocations is map &&
+             (!('logoUrl' in data) || data.logoUrl is string);
     }
 
     function isValidBudget(data) {

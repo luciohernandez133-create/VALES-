@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { VOUCHER_TEMPLATES, VoucherTemplate, VoucherItem } from './data/templates';
-import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus, LogOut, Save, Package, X, Edit2, Moon, Sun } from 'lucide-react';
+import { Download, Search, FileText, Plus, Trash2, FileSpreadsheet, Upload, Settings, RefreshCw, AlertTriangle, LayoutDashboard, Filter, Calendar, ListChecks, Menu, Home, Users, UserPlus, LogOut, Save, X, Edit2, Moon, Sun } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -103,19 +103,6 @@ interface VoucherData {
   createdBy?: string;
 }
 
-interface Budget {
-  id: string;
-  paquete: string;
-  ubicacion: string;
-  concepto: string;
-  material: string;
-  unidad: string;
-  cantidadPresupuesto: number;
-  salidas: number;
-  saldoTotal: number;
-  createdAt: string;
-}
-
 const LOCATION_DATA: Record<string, { mza: number, lotes: number[] }[]> = {
   'E': [
     { mza: 98, lotes: Array.from({ length: 14 }, (_, i) => i + 1) },
@@ -201,22 +188,12 @@ export default function App() {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [vouchers, setVouchers] = useState<VoucherData[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [showOnlyExceeded, setShowOnlyExceeded] = useState(false);
-  const [showDeleteBudgetModal, setShowDeleteBudgetModal] = useState(false);
-  const [isDeletingBudget, setIsDeletingBudget] = useState(false);
-  const [isUploadingBudget, setIsUploadingBudget] = useState(false);
   const [isUploadingTemplates, setIsUploadingTemplates] = useState(false);
-  const [filterPaquete, setFilterPaquete] = useState('');
-  const [filterUbicacion, setFilterUbicacion] = useState('');
-  const [filterConcepto, setFilterConcepto] = useState('');
-  const [filterMaterial, setFilterMaterial] = useState('');
-  const [filterUnidad, setFilterUnidad] = useState('');
   const [customTemplates, setCustomTemplates] = useState<VoucherTemplate[]>([]);
   const [activeVoucherId, setActiveVoucherId] = useState<string>('initial');
   const [draftVoucher, setDraftVoucher] = useState<VoucherData | null>(null);
   const [isDraftDirty, setIsDraftDirty] = useState(false);
-  const [activeTab, setActiveTab] = useState<'inicio' | 'captura' | 'reportes' | 'configuracion' | 'usuarios' | 'inventario'>('inicio');
+  const [activeTab, setActiveTab] = useState<'inicio' | 'captura' | 'reportes' | 'configuracion' | 'usuarios'>('inicio');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -269,11 +246,15 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showListManager, setShowListManager] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<VoucherTemplate | null>(null);
+  const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [isDeletingAllTemplates, setIsDeletingAllTemplates] = useState(false);
   const [pdfProgress, setPdfProgress] = useState<{ current: number; total: number } | null>(null);
   const [showPrintInfo, setShowPrintInfo] = useState(false);
   const [editingList, setEditingList] = useState<'destajistas' | 'elaboro' | 'autorizo' | 'ubicaciones' | 'paquetes'>('destajistas');
   const [newItemName, setNewItemName] = useState('');
   const [customLocations, setCustomLocations] = useState<Record<string, string[]>>({});
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [selectedPackageForUbicaciones, setSelectedPackageForUbicaciones] = useState<string>('J');
 
   const [packagesList, setPackagesList] = useState<string[]>([
@@ -399,10 +380,6 @@ export default function App() {
       setAppUsers(snapshot.docs.map(doc => doc.data() as AppUser));
     }, (error) => handleFirestoreError(error, OperationType.GET, 'users'));
 
-    const unsubBudgets = onSnapshot(collection(db, 'budgets'), (snapshot) => {
-      setBudgets(snapshot.docs.map(doc => doc.data() as Budget));
-    }, (error) => handleFirestoreError(error, OperationType.GET, 'budgets'));
-
     const unsubSettings = onSnapshot(doc(db, 'settings', 'lists'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -411,6 +388,7 @@ export default function App() {
         if (data.autorizoList) setAutorizoList(data.autorizoList);
         if (data.customLocations) setCustomLocations(data.customLocations);
         if (data.packagesList) setPackagesList(data.packagesList);
+        if (data.logoUrl) setLogoUrl(data.logoUrl);
       } else if (currentUser.role === 'Administrador') {
         // Initialize settings if admin
         setDoc(doc(db, 'settings', 'lists'), {
@@ -427,7 +405,6 @@ export default function App() {
       unsubVouchers();
       unsubTemplates();
       unsubUsers();
-      unsubBudgets();
       unsubSettings();
     };
   }, [isAuthReady, currentUser]);
@@ -508,11 +485,30 @@ export default function App() {
   };
 
   const handleDeleteTemplate = async (id: string) => {
-    if (!confirm('¿Estás seguro de eliminar esta plantilla?')) return;
     try {
       await deleteDoc(doc(db, 'customTemplates', id));
+      setTemplateToDelete(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `customTemplates/${id}`);
+    }
+  };
+
+  const handleDeleteAllTemplates = async () => {
+    setIsDeletingAllTemplates(true);
+    try {
+      const snapshot = await getDocs(collection(db, 'customTemplates'));
+      const batch = writeBatch(db);
+      snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      setShowDeleteAllConfirm(false);
+      alert("Todas las plantillas personalizadas han sido eliminadas.");
+    } catch (error) {
+      console.error("Error deleting all templates:", error);
+      handleFirestoreError(error, OperationType.DELETE, 'customTemplates');
+    } finally {
+      setIsDeletingAllTemplates(false);
     }
   };
 
@@ -562,7 +558,33 @@ export default function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const conceptRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (limit to 500KB to avoid Firestore limits)
+    if (file.size > 500 * 1024) {
+      alert("La imagen es muy grande. Por favor, sube una imagen de menos de 500KB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const base64 = evt.target?.result as string;
+      try {
+        await setDoc(doc(db, 'settings', 'lists'), {
+          logoUrl: base64
+        }, { merge: true });
+        setLogoUrl(base64);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'settings/lists');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const getLocationsForPackage = (paquete: string) => {
     const letter = paquete.trim().slice(-1).toUpperCase();
@@ -617,7 +639,7 @@ export default function App() {
     setActiveVoucherId(id);
   };
 
-  const saveVoucher = async (skipConfirm = false) => {
+  const saveVoucher = async () => {
     if (!draftVoucher) return;
     
     const incompleteReason = getVoucherIncompleteReason(draftVoucher);
@@ -632,49 +654,6 @@ export default function App() {
     }
     
     try {
-      const budgetUpdates = new Map<string, number>();
-      const missingBudgetItems: VoucherItem[] = [];
-      
-      const originalVoucher = vouchers.find(v => v.id === draftVoucher.id);
-      if (originalVoucher) {
-        originalVoucher.items.forEach(item => {
-          const budget = budgets.find(b => 
-            b.paquete === originalVoucher.header.paquete &&
-            b.ubicacion === originalVoucher.header.ubicacion &&
-            b.concepto === originalVoucher.header.concepto &&
-            b.material === item.descripcion
-          );
-          if (budget) {
-            budgetUpdates.set(budget.id, (budgetUpdates.get(budget.id) || 0) - item.cantidad);
-          }
-        });
-      }
-
-      draftVoucher.items.forEach(item => {
-        const budget = budgets.find(b => 
-          b.paquete === draftVoucher.header.paquete &&
-          b.ubicacion === draftVoucher.header.ubicacion &&
-          b.concepto === draftVoucher.header.concepto &&
-          b.material === item.descripcion
-        );
-        if (budget) {
-          budgetUpdates.set(budget.id, (budgetUpdates.get(budget.id) || 0) + item.cantidad);
-        } else {
-          missingBudgetItems.push(item);
-        }
-      });
-
-      const warnings: string[] = [];
-      for (const [budgetId, salidasChange] of budgetUpdates.entries()) {
-        if (salidasChange > 0) {
-          const budget = budgets.find(b => b.id === budgetId)!;
-          const newSaldo = budget.saldoTotal - salidasChange;
-          if (newSaldo < 0) {
-            warnings.push(`- ${budget.material}: Te pasas por ${Math.abs(newSaldo).toFixed(2)} ${budget.unidad}`);
-          }
-        }
-      }
-
       let finalVoucher = { 
         ...draftVoucher,
         createdAt: draftVoucher.createdAt || new Date().toISOString(),
@@ -682,222 +661,15 @@ export default function App() {
         items: draftVoucher.items.filter(item => item.descripcion !== 'MATERIAL FUERA DE PPTO')
       };
 
-      if (warnings.length > 0 && !skipConfirm) {
-        const msg = `FUERA DE PPTO\n\nLos siguientes materiales sobrepasan el presupuesto:\n${warnings.join('\n')}\n\n¿Deseas continuar y capturar el vale de todas formas?`;
-        setConfirmModal({
-          isOpen: true,
-          message: msg,
-          onConfirm: () => {
-            saveVoucher(true);
-            setConfirmModal(prev => ({ ...prev, isOpen: false }));
-          }
-        });
-        return;
-      }
+      await setDoc(doc(db, 'vouchers', finalVoucher.id), finalVoucher);
+      
+      setDraftVoucher(finalVoucher);
+      setIsDraftDirty(false);
 
-      if (warnings.length > 0) {
-        finalVoucher = {
-          ...finalVoucher,
-          header: { ...finalVoucher.header, fueraPresupuesto: true }
-        };
-      } else {
-        finalVoucher = {
-          ...finalVoucher,
-          header: { ...finalVoucher.header, fueraPresupuesto: false }
-        };
-      }
-
-      // Update Google Sheets Budget (External)
-      try {
-        const adjustments: any[] = [];
-        const originalVoucher = vouchers.find(v => v.id === draftVoucher.id);
-        
-        // 1. Subtract original items (if editing)
-        if (originalVoucher) {
-          originalVoucher.items.forEach(item => {
-            adjustments.push({
-              paquete: originalVoucher.header.paquete,
-              concepto: originalVoucher.header.concepto,
-              ubicacion: originalVoucher.header.ubicacion,
-              material: item.descripcion,
-              cantidad: -item.cantidad // Negative to subtract
-            });
-          });
-        }
-        
-        // 2. Add new items
-        finalVoucher.items.forEach(item => {
-          adjustments.push({
-            paquete: finalVoucher.header.paquete,
-            concepto: finalVoucher.header.concepto,
-            ubicacion: finalVoucher.header.ubicacion,
-            material: item.descripcion,
-            cantidad: item.cantidad // Positive to add
-          });
-        });
-
-        let responseData: any = null;
-        if (adjustments.length > 0) {
-          const response = await fetch("/api/budget/update", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ adjustments })
-          });
-          
-          if (!response.ok) {
-            let errorMessage = `Error del servidor: ${response.status} ${response.statusText}`;
-            try {
-              const text = await response.text();
-              try {
-                const errorData = JSON.parse(text);
-                errorMessage = errorData.error || errorMessage;
-              } catch (e) {
-                errorMessage += ` - ${text.substring(0, 100)}`;
-              }
-            } catch (e) {
-              // Ignore
-            }
-            throw new Error(errorMessage);
-          }
-          
-          try {
-            const text = await response.text();
-            responseData = JSON.parse(text);
-          } catch (e) {
-            throw new Error("Respuesta inválida del servidor (no es JSON)");
-          }
-        }
-
-        // Process results to split voucher if needed
-        const offset = originalVoucher ? originalVoucher.items.length : 0;
-        const additionResults = responseData?.results?.slice(offset) || [];
-        
-        const inBudgetItems: VoucherItem[] = [];
-        const outBudgetItems: VoucherItem[] = [...missingBudgetItems];
-        let hasOutBudget = missingBudgetItems.length > 0;
-
-        finalVoucher.items.forEach((item, index) => {
-          if (missingBudgetItems.includes(item)) {
-            return;
-          }
-          
-          const result = additionResults[index];
-          if (result && result.found) {
-            if (result.inBudget > 0) {
-              const cleanDesc = item.descripcion.replace(" - MATERIAL FUERA DE PPTO", "");
-              inBudgetItems.push({
-                ...item,
-                descripcion: cleanDesc,
-                cantidad: result.inBudget
-              });
-            }
-            if (result.outBudget > 0) {
-              hasOutBudget = true;
-              const cleanDesc = item.descripcion.replace(" - MATERIAL FUERA DE PPTO", "");
-              // Add the material row
-              outBudgetItems.push({
-                ...item,
-                descripcion: cleanDesc,
-                cantidad: result.outBudget
-              });
-            }
-          } else {
-            // If not found or no result, keep as is in the first voucher
-            inBudgetItems.push(item);
-          }
-        });
-
-        const batch = writeBatch(db);
-        
-        // Voucher 1 (In Budget)
-        let voucher1 = { ...finalVoucher, items: inBudgetItems };
-        if (inBudgetItems.length > 0) {
-          batch.set(doc(db, 'vouchers', voucher1.id), voucher1);
-        } else if (originalVoucher) {
-          // If we were editing and now it's empty (all moved to voucher 2), delete original?
-          // Actually, let's just keep it with 0 items or delete it.
-          // User said "DEJANDO UNICAMENTE EN EL PRIMER VALE LO QUE ESTA AUN EN PRESUPUESTO"
-          // If nothing is in budget, we might not need the first voucher.
-          // But usually, it's better to keep the ID if possible.
-          batch.delete(doc(db, 'vouchers', voucher1.id));
-        }
-
-        // Voucher 2 (Out of Budget)
-        let voucher2: any = null;
-        if (hasOutBudget) {
-          const newId = doc(collection(db, 'vouchers')).id;
-          // Generate a new folio for the second voucher
-          const baseFolio = finalVoucher.header.folio;
-          const secondFolio = `${baseFolio}-B`;
-          
-          voucher2 = {
-            ...finalVoucher,
-            id: newId,
-            header: {
-              ...finalVoucher.header,
-              folio: secondFolio,
-              fueraPresupuesto: true
-            },
-            items: outBudgetItems
-          };
-          batch.set(doc(db, 'vouchers', newId), voucher2);
-        }
-
-        // Local budget updates (Firestore)
-        for (const [budgetId, salidasChange] of budgetUpdates.entries()) {
-          if (salidasChange !== 0) {
-            const budget = budgets.find(b => b.id === budgetId)!;
-            const newSalidas = budget.salidas + salidasChange;
-            const newSaldo = budget.cantidadPresupuesto - newSalidas;
-            batch.update(doc(db, 'budgets', budgetId), {
-              salidas: newSalidas,
-              saldoTotal: newSaldo
-            });
-          }
-        }
-
-        await batch.commit();
-        
-        // Update UI state
-        if (inBudgetItems.length > 0) {
-          setDraftVoucher(voucher1);
-        } else if (voucher2) {
-          setDraftVoucher(voucher2);
-        }
-        setIsDraftDirty(false);
-
-        // Success message
-        let successMsg = "Vale guardado correctamente y sincronizado con Google Sheets.";
-        if (hasOutBudget) {
-          successMsg += `\n\nSE CREÓ UN SEGUNDO VALE (${voucher2.header.folio}) PARA EL MATERIAL FUERA DE PRESUPUESTO.`;
-        }
-        if (missingBudgetItems.length > 0) {
-          successMsg += `\n\nEL MATERIAL NO SE ENCUENTRA PRESUPUESTADO.`;
-        }
-
-        if (responseData?.notFound && responseData.notFound.length > 0) {
-          const missingItems = responseData.notFound.map((item: any) => 
-            `- ${item.material}`
-          ).join('\n');
-          successMsg += `\n\nAlgunos materiales no se encontraron en Google Sheets:\n${missingItems}`;
-        }
-
-        const details = responseData?.results?.map((r: any) => 
-          `- ${r.material} -> Fila: ${r.range || 'N/A'} (Nuevo: ${r.newValue || 'N/A'})`
-        ).join("\n") || 'Sin detalles de celdas.';
-        
-        setAlertModal({ 
-          isOpen: true, 
-          message: `${successMsg}\n\nDetalles de actualización:\n${details}` 
-        });
-
-      } catch (err: any) {
-        console.error("Failed to sync with Google Sheets:", err);
-        setAlertModal({ 
-          isOpen: true, 
-          message: `Error al guardar: ${err.message}` 
-        });
-      }
+      setAlertModal({ 
+        isOpen: true, 
+        message: "Vale guardado correctamente." 
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'vouchers');
     }
@@ -973,135 +745,6 @@ export default function App() {
     setDraftVoucher(newVoucher);
     setIsDraftDirty(true);
     setActiveVoucherId(newId);
-  };
-
-  const handleDeleteBudget = async () => {
-    try {
-      setIsDeletingBudget(true);
-      // Delete existing budgets in chunks with a small delay to avoid rate limits
-      // Reduced batch size and increased delay for better stability
-      const BATCH_SIZE = 200;
-      const DELAY_MS = 500;
-      
-      for (let i = 0; i < budgets.length; i += BATCH_SIZE) {
-        const batch = writeBatch(db);
-        const chunk = budgets.slice(i, i + BATCH_SIZE);
-        chunk.forEach(b => {
-          batch.delete(doc(db, 'budgets', b.id));
-        });
-        await batch.commit();
-        // Small delay between batches to respect rate limits
-        await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-      }
-      setShowDeleteBudgetModal(false);
-      alert('Existencias eliminadas correctamente.');
-    } catch (error: any) {
-      console.error("Error deleting budget:", error);
-      if (error.message?.includes('quota') || error.message?.includes('exhausted')) {
-        alert('Error: Has alcanzado el límite de escritura de Firebase o la cuota diaria. Intenta de nuevo más tarde o reduce el tamaño del archivo.');
-      } else {
-        alert('Error al eliminar las existencias.');
-      }
-    } finally {
-      setIsDeletingBudget(false);
-    }
-  };
-
-  const handleBudgetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploadingBudget(true);
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        
-        let data: any[] = [];
-        for (const wsname of wb.SheetNames) {
-          const ws = wb.Sheets[wsname];
-          const sheetData = XLSX.utils.sheet_to_json(ws) as any[];
-          data = data.concat(sheetData);
-        }
-
-        if (data.length > 0) {
-          const BATCH_SIZE = 200;
-          const DELAY_MS = 500;
-
-          // 1. Delete existing budgets first
-          for (let i = 0; i < budgets.length; i += BATCH_SIZE) {
-            const batch = writeBatch(db);
-            const chunk = budgets.slice(i, i + BATCH_SIZE);
-            chunk.forEach(b => {
-              batch.delete(doc(db, 'budgets', b.id));
-            });
-            await batch.commit();
-            await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-          }
-          
-          // 2. Add new budgets in chunks
-          for (let i = 0; i < data.length; i += BATCH_SIZE) {
-            const batch = writeBatch(db);
-            const chunk = data.slice(i, i + BATCH_SIZE);
-            
-            chunk.forEach(row => {
-              const id = crypto.randomUUID();
-              const budgetRef = doc(db, 'budgets', id);
-              
-              // Normalize keys to handle different Excel headers
-              const getVal = (keys: string[]) => {
-                for (const k of keys) {
-                  if (row[k] !== undefined) return row[k];
-                }
-                return '';
-              };
-              
-              const getNum = (keys: string[]) => {
-                const val = getVal(keys);
-                const parsed = parseFloat(val);
-                return isNaN(parsed) ? 0 : parsed;
-              };
-
-              const cantidadPresupuesto = getNum(['Cantidad en presupuesto', 'Cantidad', 'Presupuesto', 'CANTIDAD', 'PRESUPUESTO', 'Existencia', 'EXISTENCIA', 'Existencias', 'EXISTENCIAS']);
-              const salidas = getNum(['Salidas', 'Salida', 'SALIDAS', 'SALIDA']);
-              const saldoTotal = getNum(['Saldo total', 'Saldo', 'SALDO', 'SALDO TOTAL', 'Existencia actual', 'EXISTENCIA ACTUAL']) || (cantidadPresupuesto - salidas);
-
-              const budgetItem: Budget = {
-                id,
-                paquete: String(getVal(['Paquete', 'PAQUETE'])),
-                ubicacion: String(getVal(['Ubicación', 'Ubicacion', 'UBICACION', 'UBICACIÓN'])),
-                concepto: String(getVal(['Concepto', 'CONCEPTO'])),
-                material: String(getVal(['Material', 'MATERIAL', 'Descripcion', 'Descripción', 'DESCRIPCION', 'DESCRIPCIÓN'])),
-                unidad: String(getVal(['Unidad', 'UNIDAD', 'U.M.', 'UM', 'U.M'])),
-                cantidadPresupuesto,
-                salidas,
-                saldoTotal,
-                createdAt: new Date().toISOString()
-              };
-              
-              batch.set(budgetRef, budgetItem);
-            });
-            await batch.commit();
-            await new Promise(resolve => setTimeout(resolve, DELAY_MS));
-          }
-
-          alert('Presupuesto cargado exitosamente');
-        }
-      } catch (error: any) {
-        console.error("Error uploading budget:", error);
-        if (error.message?.includes('quota') || error.message?.includes('exhausted')) {
-          alert('Error: Has alcanzado el límite de escritura de Firebase. Intenta de nuevo más tarde.');
-        } else {
-          alert('Error al cargar el presupuesto. Asegúrate de que el formato sea correcto.');
-        }
-      } finally {
-        setIsUploadingBudget(false);
-      }
-    };
-    reader.readAsBinaryString(file);
-    // Reset input
-    e.target.value = '';
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1199,7 +842,7 @@ export default function App() {
     if (!skipConfirm) {
       setConfirmModal({
         isOpen: true,
-        message: '¿Estás seguro de eliminar este vale? Esta acción no se puede deshacer y devolverá el material al presupuesto.',
+        message: '¿Estás seguro de eliminar este vale? Esta acción no se puede deshacer.',
         onConfirm: () => {
           handleRemoveVoucher(id, true);
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -1209,122 +852,8 @@ export default function App() {
     }
 
     try {
-      const voucherToDelete = vouchers.find(v => v.id === id);
-      if (voucherToDelete) {
-        const batch = writeBatch(db);
-        batch.delete(doc(db, 'vouchers', id));
-
-        // Revert budget (Internal)
-        const budgetUpdates = new Map<string, number>();
-        voucherToDelete.items.forEach(item => {
-          const budget = budgets.find(b => 
-            b.paquete === voucherToDelete.header.paquete &&
-            b.ubicacion === voucherToDelete.header.ubicacion &&
-            b.concepto === voucherToDelete.header.concepto &&
-            b.material === item.descripcion
-          );
-          if (budget) {
-            budgetUpdates.set(budget.id, (budgetUpdates.get(budget.id) || 0) - item.cantidad);
-          }
-        });
-
-        for (const [budgetId, salidasChange] of budgetUpdates.entries()) {
-          if (salidasChange !== 0) {
-            const budget = budgets.find(b => b.id === budgetId)!;
-            const newSalidas = budget.salidas + salidasChange; // salidasChange is negative
-            const newSaldo = budget.cantidadPresupuesto - newSalidas;
-            batch.update(doc(db, 'budgets', budgetId), {
-              salidas: newSalidas,
-              saldoTotal: newSaldo
-            });
-          }
-        }
-
-        await batch.commit();
-
-        let hasNotFound = false;
-
-        // Update Google Sheets Budget (External)
-        try {
-          const adjustments = voucherToDelete.items.map(item => ({
-            paquete: voucherToDelete.header.paquete,
-            concepto: voucherToDelete.header.concepto,
-            ubicacion: voucherToDelete.header.ubicacion,
-            material: item.descripcion,
-            cantidad: -item.cantidad // Negative to "return" to budget
-          }));
-
-          if (adjustments.length > 0) {
-            const response = await fetch("/api/budget/update", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ adjustments })
-            });
-            
-            if (!response.ok) {
-              let errorMessage = `Error del servidor: ${response.status} ${response.statusText}`;
-              try {
-                const text = await response.text();
-                try {
-                  const errorData = JSON.parse(text);
-                  errorMessage = errorData.error || errorMessage;
-                } catch (e) {
-                  errorMessage += ` - ${text.substring(0, 100)}`;
-                }
-              } catch (e) {
-                // Ignore
-              }
-              console.warn("Google Sheets Sync Warning:", errorMessage);
-              setAlertModal({ 
-                isOpen: true, 
-                message: `Vale eliminado en la base de datos, pero hubo un problema al actualizar Google Sheets:\n${errorMessage}` 
-              });
-              return;
-            }
-
-            let responseData: any = null;
-            try {
-              const text = await response.text();
-              responseData = JSON.parse(text);
-            } catch (e) {
-              console.warn("Google Sheets Sync Warning: Respuesta inválida del servidor");
-              setAlertModal({ 
-                isOpen: true, 
-                message: `Vale eliminado en la base de datos, pero hubo un problema al actualizar Google Sheets:\nRespuesta inválida del servidor (no es JSON)` 
-              });
-              return;
-            }
-            
-            if (responseData.notFound && responseData.notFound.length > 0) {
-              hasNotFound = true;
-              const missingItems = responseData.notFound.map((item: any) => 
-                `- ${item.material} (Paquete: ${item.paquete})\n  Hojas buscadas: ${item.searchedSheets?.join(", ") || "Ninguna"}`
-              ).join('\n');
-              setAlertModal({
-                isOpen: true,
-                message: `Vale eliminado en la base de datos, pero algunos materiales no se encontraron en Google Sheets:\n\n${missingItems}\n\nVerifica que Concepto, Ubicación y Material coincidan exactamente.`
-              });
-            }
-
-            const details = responseData.results?.map((r: any) => 
-              `- ${r.material} -> Hoja: ${r.sheetUsed} (${r.range})`
-            ).join("\n") || responseData.updatedRanges?.join(', ') || 'ninguno';
-
-            if (!hasNotFound) {
-              setAlertModal({ 
-                isOpen: true, 
-                message: `Vale eliminado correctamente y sincronizado con Google Sheets.\n\nCeldas actualizadas:\n${details}` 
-              });
-            }
-          }
-        } catch (err: any) {
-          console.error("Failed to sync with Google Sheets:", err);
-          setAlertModal({ 
-            isOpen: true, 
-            message: `Vale eliminado en la base de datos, pero falló la conexión con Google Sheets:\n${err.message}` 
-          });
-        }
-      }
+      await deleteDoc(doc(db, 'vouchers', id));
+      
       if (activeVoucher?.id === id) {
         const nextVoucher = vouchers.find(v => v.id !== id);
         if (nextVoucher) {
@@ -1337,6 +866,8 @@ export default function App() {
           handleAddVoucher(undefined, true);
         }
       }
+      
+      setAlertModal({ isOpen: true, message: 'Vale eliminado correctamente.' });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'vouchers');
     }
@@ -2033,43 +1564,59 @@ export default function App() {
     saveAs(new Blob([buffer]), `Vales_Export_${new Date().getTime()}.xlsx`);
   };
 
+  const [previewTemplates, setPreviewTemplates] = useState<any[] | null>(null);
+
+  const confirmTemplateUpload = async () => {
+    if (!previewTemplates) return;
+    setIsUploadingTemplates(true);
+    try {
+      const existingTemplatesSnapshot = await getDocs(collection(db, 'customTemplates'));
+      const existingTemplates = existingTemplatesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      const batch = writeBatch(db);
+      let updatedCount = 0;
+      let createdCount = 0;
+
+      previewTemplates.forEach((t: any) => {
+        const existingMatch = existingTemplates.find((existing: any) => 
+          String(existing.subConcepto).toLowerCase().trim() === String(t.subConcepto).toLowerCase().trim()
+        );
+
+        if (existingMatch) {
+          const id = existingMatch.id;
+          batch.set(doc(db, 'customTemplates', id), { ...t, id });
+          updatedCount++;
+        } else {
+          const id = `custom-${crypto.randomUUID()}`;
+          batch.set(doc(db, 'customTemplates', id), { ...t, id });
+          createdCount++;
+        }
+      });
+
+      await batch.commit();
+      alert(`Proceso completado:\n- ${updatedCount} plantillas actualizadas (reemplazadas).\n- ${createdCount} plantillas nuevas creadas.`);
+    } catch (error) {
+      console.error("Error saving templates:", error);
+      handleFirestoreError(error, OperationType.CREATE, 'customTemplates');
+    } finally {
+      setPreviewTemplates(null);
+      setIsUploadingTemplates(false);
+    }
+  };
+
   const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploadingTemplates(true);
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary' });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        
-        // 1. Find the actual header row (in case there are titles/empty rows at the top)
-        const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-        let headerRowIdx = 0;
         
         const normalizeKeyStr = (k: any) => String(k || '').normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
         
-        for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
-          const row = rawRows[i] || [];
-          const normalizedRow = row.map(normalizeKeyStr);
-          if (normalizedRow.some(k => ['material', 'descripcion', 'insumo', 'articulo', 'producto'].includes(k))) {
-            headerRowIdx = i;
-            break;
-          }
-        }
-
-        // 2. Parse data starting from the detected header row
-        const data = XLSX.utils.sheet_to_json(ws, { range: headerRowIdx }) as any[];
-
-        if (data.length === 0) {
-          alert("El archivo está vacío o no se pudo leer correctamente.");
-          setIsUploadingTemplates(false);
-          return;
-        }
-
         // Helper to get value using normalized keys
         const getValue = (row: any, possibleKeys: string[]) => {
           const rowKeys = Object.keys(row);
@@ -2084,57 +1631,158 @@ export default function App() {
           return undefined;
         };
 
-        // Group items by Concepto + SubConcepto
+        // Group items by Concepto + SubConcepto across ALL sheets
         const grouped: Record<string, any> = {};
-        
-        data.forEach(row => {
-          const concepto = String(getValue(row, ['Concepto', 'Partida', 'Actividad']) || 'SIN CONCEPTO').trim();
-          const subConcepto = String(getValue(row, ['SubConcepto', 'SubPartida', 'SubActividad']) || 'SIN SUBCONCEPTO').trim();
-          const paquete = String(getValue(row, ['Paquete', 'Lote', 'Etapa']) || '').trim();
-          const prototipo = String(getValue(row, ['Prototipo', 'Modelo']) || '').trim();
+        let totalRowsParsed = 0;
+
+        // Iterate over all sheets
+        for (const wsname of wb.SheetNames) {
+          const ws = wb.Sheets[wsname];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+          totalRowsParsed += rows.length;
           
-          const material = String(getValue(row, ['Material', 'Descripcion', 'Insumo', 'Articulo', 'Producto']) || '').trim();
+          let currentHeaderIdx = -1;
+          let lastFooterIdx = 0;
           
-          if (material && material !== 'MATERIAL FUERA DE PPTO' && material !== 'undefined') {
-            const key = `${concepto}|${subConcepto}`;
-            if (!grouped[key]) {
-              grouped[key] = {
-                concepto,
-                subConcepto,
-                paquete,
-                prototipo,
-                items: []
-              };
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i] || [];
+            const rowStr = row.map(c => String(c || '').toUpperCase().replace(/\s+/g, '')).join('');
+            
+            // Detect Green Row (Header)
+            if (currentHeaderIdx === -1 && (rowStr.includes('DESCRIPCION') || rowStr.includes('MATERIAL')) && (rowStr.includes('CANTIDAD') || rowStr.includes('CANT'))) {
+              currentHeaderIdx = i;
             }
             
-            const rawCantidad = getValue(row, ['Cantidad', 'Cant', 'Volumen']);
-            
-            grouped[key].items.push({
-              descripcion: material,
-              unidad: String(getValue(row, ['Unidad', 'UM', 'Medida', 'U']) || '').trim(),
-              cantidad: parseFloat(String(rawCantidad).replace(/[^0-9.-]+/g, "")) || 0
-            });
+            // Detect Blue Row (Footer)
+            if (currentHeaderIdx !== -1 && (rowStr.includes('ELABORO') || rowStr.includes('ELABORÓ') || rowStr.includes('AUTORIZO') || rowStr.includes('AUTORIZÓ'))) {
+              const footerIdx = i;
+              
+              // Process this voucher block
+              let concepto = "";
+              for (let r = lastFooterIdx; r < currentHeaderIdx; r++) {
+                const rData = rows[r] || [];
+                for (let c = 0; c < rData.length; c++) {
+                  const cell = String(rData[c] || '').toUpperCase().trim();
+                  if (cell === 'CONCEPTO:' || cell === 'CONCEPTO') {
+                    let valCol = -1;
+                    for (let k = c + 1; k < rData.length; k++) {
+                      if (rData[k]) { valCol = k; break; }
+                    }
+                    if (valCol !== -1) {
+                      let parts = [];
+                      for (let rr = r; rr <= Math.min(r + 3, currentHeaderIdx - 1); rr++) {
+                         if (rows[rr] && rows[rr][valCol]) {
+                           parts.push(String(rows[rr][valCol]).trim());
+                         }
+                      }
+                      concepto = parts.join(" ");
+                    }
+                    break;
+                  }
+                }
+                if (concepto) break;
+              }
+              
+              // Fallback for Concepto if not found by label
+              if (!concepto) {
+                 let found = [];
+                 for(let r = lastFooterIdx; r < currentHeaderIdx; r++) {
+                   if(rows[r] && rows[r][8]) found.push(String(rows[r][8]).trim());
+                   else if(rows[r] && rows[r][9]) found.push(String(rows[r][9]).trim());
+                 }
+                 if (found.length > 0) concepto = found.join(" ");
+              }
+              
+              // Extract SubConcepto (Light blue box, usually bottom right)
+              const headerRow = rows[currentHeaderIdx].map(c => String(c || '').toUpperCase().trim());
+              let colDesc = headerRow.findIndex(c => c.includes('DESCRIPCION') || c.includes('MATERIAL'));
+              if (colDesc === -1) colDesc = 3;
+
+              let subConceptoParts = [];
+              for (let r = Math.max(currentHeaderIdx + 1, footerIdx - 5); r < footerIdx; r++) {
+                const rData = rows[r] || [];
+                for (let c = colDesc + 2; c <= 15; c++) {
+                  const cellVal = String(rData[c] || '').trim();
+                  if (cellVal !== '' && !cellVal.toUpperCase().includes('FUERA DE PPTO') && !cellVal.match(/^[0-9.,$]+$/)) {
+                    subConceptoParts.push(cellVal);
+                    break;
+                  }
+                }
+              }
+              let subConcepto = subConceptoParts.join(" ").trim();
+              
+              if (!concepto) concepto = "SIN CONCEPTO";
+              if (!subConcepto) subConcepto = "SIN SUBCONCEPTO";
+              
+              // Extract Items
+              let colUnidad = headerRow.findIndex(c => c.includes('UNIDAD'));
+              let colCantidad = headerRow.findIndex(c => c.includes('CANTIDAD') || c.includes('CANT'));
+              
+              if (colUnidad === -1) colUnidad = 1;
+              if (colCantidad === -1) colCantidad = 2;
+              
+              const items = [];
+              for (let r = currentHeaderIdx + 1; r < footerIdx; r++) {
+                const rData = rows[r] || [];
+                const desc = String(rData[colDesc] || '').trim();
+                const cantRaw = rData[colCantidad];
+                const uni = String(rData[colUnidad] || '').trim();
+                
+                if (desc && desc !== '' && !desc.toUpperCase().includes('FUERA DE PPTO')) {
+                  const cant = parseFloat(String(cantRaw).replace(/[^0-9.-]+/g, "")) || 0;
+                  if (cant > 0 || uni !== '') {
+                     items.push({
+                       descripcion: desc,
+                       cantidad: cant,
+                       unidad: uni
+                     });
+                  }
+                }
+              }
+              
+              // Add to grouped
+              if (items.length > 0) {
+                const key = `${concepto}|${subConcepto}`;
+                if (!grouped[key]) {
+                  grouped[key] = {
+                    concepto,
+                    subConcepto,
+                    paquete: '',
+                    prototipo: '',
+                    items: []
+                  };
+                }
+                
+                items.forEach(newItem => {
+                  const exists = grouped[key].items.find((i:any) => i.descripcion === newItem.descripcion);
+                  if (!exists) {
+                    grouped[key].items.push(newItem);
+                  } else {
+                    exists.cantidad += newItem.cantidad;
+                  }
+                });
+              }
+              
+              // Reset for next voucher
+              currentHeaderIdx = -1;
+              lastFooterIdx = footerIdx;
+            }
           }
-        });
+        }
+
+        if (totalRowsParsed === 0) {
+          alert("El archivo está vacío o no se pudo leer correctamente en ninguna de sus hojas.");
+          setIsUploadingTemplates(false);
+          return;
+        }
 
         const templatesToUpload = Object.values(grouped).filter(t => t.items.length > 0);
 
         if (templatesToUpload.length > 0) {
-          const batch = writeBatch(db);
-          templatesToUpload.forEach((t: any) => {
-            const id = `custom-${crypto.randomUUID()}`;
-            batch.set(doc(db, 'customTemplates', id), { ...t, id });
-          });
-          batch.commit().then(() => {
-            alert(`${templatesToUpload.length} plantillas añadidas correctamente.`);
-            setIsUploadingTemplates(false);
-          }).catch(error => {
-            handleFirestoreError(error, OperationType.CREATE, 'customTemplates');
-            setIsUploadingTemplates(false);
-          });
+          setPreviewTemplates(templatesToUpload);
+          setIsUploadingTemplates(false);
         } else {
-          const detectedCols = data.length > 0 ? Object.keys(data[0]).slice(0, 10).join(", ") : "Ninguna";
-          alert(`No se encontraron plantillas válidas.\n\nColumnas detectadas en tu archivo:\n${detectedCols}\n\nAsegúrate de incluir al menos una columna llamada "Descripcion" o "Material".`);
+          alert(`No se encontraron plantillas válidas en el formato esperado.\n\nAsegúrate de que el archivo tenga la estructura visual de un Vale de Salida (con "CONCEPTO", "DESCRIPCION", "CANTIDAD" y firmas de "ELABORO"/"AUTORIZO").`);
           setIsUploadingTemplates(false);
         }
       } catch (error) {
@@ -2154,10 +1802,28 @@ export default function App() {
   ];
   console.log("All templates:", allTemplates);
 
-  const filteredTemplates = allTemplates.filter(t => 
-    t.concepto.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    t.subConcepto.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredTemplates = allTemplates.filter(t => {
+    const matchesSearch = t.concepto.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         t.subConcepto.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (!matchesSearch) return false;
+    if (t.id === 'empty') return true;
+
+    const currentPaquete = activeVoucher?.header.paquete || '';
+    if (!currentPaquete) return true;
+
+    const oldPackages = ['F', 'G', 'H'];
+    const newPackages = ['P', 'Q', 'K', 'J'];
+
+    if (oldPackages.includes(currentPaquete)) {
+      return t.paquete === 'F,G,H';
+    }
+    if (newPackages.includes(currentPaquete)) {
+      return t.paquete === 'P,Q,K,J';
+    }
+
+    return true;
+  });
 
   const isDuplicateVoucher = useMemo(() => {
     if (!activeVoucher || !activeVoucher.header.paquete || !activeVoucher.header.ubicacion || !activeVoucher.templateId) return false;
@@ -2453,24 +2119,6 @@ export default function App() {
             )}
           </button>
 
-          <button 
-            onClick={() => setActiveTab('inventario')}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group relative",
-              activeTab === 'inventario' 
-                ? "bg-[var(--color-sidebar-active)] text-[var(--color-sidebar-text-active)] font-bold shadow-md" 
-                : "hover:bg-[var(--color-sidebar-hover)] text-[var(--color-sidebar-text)]"
-            )}
-          >
-            <Package size={20} className="shrink-0" />
-            <span className={cn("whitespace-nowrap transition-all duration-300 text-sm", !isSidebarOpen && "hidden")}>Inventario / Presupuesto</span>
-            {!isSidebarOpen && (
-              <div className="absolute left-full ml-4 px-2 py-1 bg-zinc-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                Inventario / Presupuesto
-              </div>
-            )}
-          </button>
-
           {currentUser?.role === 'Administrador' && (
             <button 
               onClick={() => setActiveTab('usuarios')}
@@ -2594,9 +2242,39 @@ export default function App() {
                     </div>
                   </div>
                   
-                  {/* Right Column - Placeholder */}
-                  <div className="hidden lg:flex justify-center items-center">
-                    <div className="w-64 h-64 border border-[var(--color-line)] rounded-full flex items-center justify-center">
+                  {/* Right Column - Logo Placeholder */}
+                  <div className="hidden lg:flex justify-center items-center relative group">
+                    <input 
+                      type="file" 
+                      ref={logoInputRef} 
+                      onChange={handleLogoUpload} 
+                      className="hidden" 
+                      accept="image/*"
+                    />
+                    <div 
+                      onClick={() => logoInputRef.current?.click()}
+                      className={cn(
+                        "flex flex-col items-center justify-center cursor-pointer transition-all relative group",
+                        logoUrl 
+                          ? "w-64 h-auto max-h-64 rounded-2xl" 
+                          : "w-64 h-64 border-2 border-dashed border-[var(--color-line)] rounded-full hover:border-[var(--color-accent-cyan)] hover:bg-[var(--color-sidebar-bg)] overflow-hidden"
+                      )}
+                    >
+                      {logoUrl ? (
+                        <>
+                          <img src={logoUrl} alt="Logo" className="w-full h-full object-contain rounded-2xl" />
+                          {/* Hover overlay for changing logo */}
+                          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl backdrop-blur-sm">
+                            <Upload size={32} className="text-white mb-2" />
+                            <span className="text-white text-sm font-medium">Cambiar Logo</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center text-zinc-400 group-hover:text-[var(--color-accent-cyan)] transition-colors">
+                          <Upload size={32} className="mx-auto mb-2 opacity-50" />
+                          <span className="text-sm font-medium">Subir Logo</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2644,6 +2322,143 @@ export default function App() {
         )}
 
         {/* List Manager Modal */}
+        {/* Modal de Vista Previa de Plantillas */}
+        {previewTemplates && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-5xl max-h-[90vh] shadow-2xl border-2 border-zinc-100 flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="p-6 border-b border-zinc-100 flex items-center justify-between bg-zinc-50">
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-800">Vista Previa de Importación</h2>
+                  <p className="text-sm text-zinc-500 mt-1">Revisa que los datos se hayan mapeado correctamente antes de guardar. Se detectaron {previewTemplates.length} plantillas.</p>
+                </div>
+                <button onClick={() => setPreviewTemplates(null)} className="p-2 hover:bg-zinc-200 rounded-full transition-all">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 bg-zinc-100/50">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {previewTemplates.map((t, i) => (
+                    <div key={i} className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase">Concepto</div>
+                        <div className="font-bold text-zinc-800 text-sm">{t.concepto}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase">SubConcepto</div>
+                        <div className="font-bold text-blue-600 text-sm">{t.subConcepto}</div>
+                      </div>
+                      <div className="pt-2 border-t border-zinc-100">
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase mb-2">Materiales ({t.items.length})</div>
+                        <div className="space-y-1 max-h-32 overflow-y-auto pr-2">
+                          {t.items.map((item: any, j: number) => (
+                            <div key={j} className="text-xs flex justify-between items-start gap-2 bg-zinc-50 p-1.5 rounded">
+                              <span className="text-zinc-700 line-clamp-2 flex-1">{item.descripcion}</span>
+                              <span className="text-zinc-500 font-mono whitespace-nowrap">{item.cantidad} {item.unidad}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="p-6 border-t border-zinc-100 bg-white flex justify-end gap-3">
+                <button 
+                  onClick={() => setPreviewTemplates(null)}
+                  className="px-6 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={confirmTemplateUpload}
+                  disabled={isUploadingTemplates}
+                  className="px-6 py-2.5 bg-black hover:bg-zinc-800 text-white rounded-xl font-bold transition-all flex items-center gap-2"
+                >
+                  {isUploadingTemplates ? (
+                    <><RefreshCw size={16} className="animate-spin" /> Guardando...</>
+                  ) : (
+                    <><Save size={16} /> Confirmar y Guardar</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal para Confirmar Eliminación de Todas las Plantillas */}
+        {showDeleteAllConfirm && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-zinc-100 animate-in zoom-in-95 duration-200 p-6 space-y-6">
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center">
+                  <AlertTriangle size={32} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-800">¿Eliminar TODAS las plantillas?</h2>
+                  <p className="text-sm text-zinc-500 mt-2">
+                    Estás a punto de eliminar <span className="font-bold text-red-600">{customTemplates.length}</span> plantillas personalizadas. Esta acción no se puede deshacer.
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setShowDeleteAllConfirm(false)}
+                  className="flex-1 px-4 py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={handleDeleteAllTemplates}
+                  disabled={isDeletingAllTemplates}
+                  className="flex-1 px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  {isDeletingAllTemplates ? (
+                    <><RefreshCw size={16} className="animate-spin" /> Eliminando...</>
+                  ) : (
+                    <><Trash2 size={16} /> Sí, Eliminar Todas</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal para Confirmar Eliminación de Plantilla */}
+        {templateToDelete && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-zinc-100 animate-in zoom-in-95 duration-200 p-6 space-y-6">
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center">
+                  <AlertTriangle size={32} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-zinc-800">¿Eliminar plantilla?</h2>
+                  <p className="text-sm text-zinc-500 mt-2">
+                    Esta acción no se puede deshacer. La plantilla será eliminada permanentemente del sistema.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-zinc-100">
+                <button 
+                  onClick={() => setTemplateToDelete(null)}
+                  className="flex-1 px-4 py-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => handleDeleteTemplate(templateToDelete)}
+                  className="flex-1 px-4 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-bold transition-all shadow-lg shadow-red-500/20"
+                >
+                  Sí, eliminar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Modal para Editar Plantilla */}
         {editingTemplate && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
@@ -3671,6 +3486,13 @@ export default function App() {
                   </h2>
                   <div className="flex gap-2">
                     <button 
+                      onClick={() => setShowDeleteAllConfirm(true)}
+                      className="flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-red-200"
+                    >
+                      <Trash2 size={14} />
+                      Eliminar Todas
+                    </button>
+                    <button 
                       onClick={() => setShowBulkUpdateModal(true)}
                       className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-zinc-200"
                     >
@@ -3740,7 +3562,7 @@ export default function App() {
                                 <Edit2 size={16} />
                               </button>
                               <button 
-                                onClick={() => handleDeleteTemplate(template.id)}
+                                onClick={() => setTemplateToDelete(template.id)}
                                 className="text-zinc-400 hover:text-red-500 transition-all"
                                 title="Eliminar plantilla"
                               >
@@ -3983,151 +3805,6 @@ export default function App() {
             </div>
           </div>
         )}
-        {/* Inventario Tab */}
-        {activeTab === 'inventario' && (
-          <div className="flex-1 overflow-hidden flex flex-col bg-[var(--color-app-bg)]">
-            <div className="p-4 md:p-6 border-b-2 border-[var(--color-line)] bg-[var(--color-sidebar-bg)] shrink-0 flex flex-col gap-4">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-zinc-800 flex items-center gap-2">
-                  <Package className="text-black" />
-                  Inventario y Presupuesto
-                </h2>
-                <div className="flex gap-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-zinc-700 mr-4 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-zinc-300 text-black focus:ring-black"
-                      checked={showOnlyExceeded}
-                      onChange={(e) => setShowOnlyExceeded(e.target.checked)}
-                    />
-                    Solo mostrar excedidos
-                  </label>
-                  <button 
-                    onClick={() => setShowDeleteBudgetModal(true)}
-                    className="bg-red-50 text-red-600 hover:bg-red-100 px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border border-red-200"
-                  >
-                    <Trash2 size={18} />
-                    Eliminar Existencias
-                  </button>
-                  <label className={cn(
-                    "bg-black hover:bg-zinc-800 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-md cursor-pointer",
-                    isUploadingBudget && "opacity-50 cursor-not-allowed"
-                  )}>
-                    {isUploadingBudget ? (
-                      <>
-                        <RefreshCw size={18} className="animate-spin" />
-                        Cargando...
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={18} />
-                        Cargar Existencias/Presupuesto (Excel)
-                      </>
-                    )}
-                    <input 
-                      type="file" 
-                      accept=".xlsx, .xls" 
-                      className="hidden" 
-                      onChange={handleBudgetUpload} 
-                      disabled={isUploadingBudget}
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Filtros */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 pt-2">
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por Paquete..." 
-                  value={filterPaquete}
-                  onChange={(e) => setFilterPaquete(e.target.value)}
-                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-black focus:border-black outline-none"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por Ubicación..." 
-                  value={filterUbicacion}
-                  onChange={(e) => setFilterUbicacion(e.target.value)}
-                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-black focus:border-black outline-none"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por Concepto..." 
-                  value={filterConcepto}
-                  onChange={(e) => setFilterConcepto(e.target.value)}
-                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-black focus:border-black outline-none"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por Material..." 
-                  value={filterMaterial}
-                  onChange={(e) => setFilterMaterial(e.target.value)}
-                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-black focus:border-black outline-none"
-                />
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por Unidad..." 
-                  value={filterUnidad}
-                  onChange={(e) => setFilterUnidad(e.target.value)}
-                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:ring-2 focus:ring-black focus:border-black outline-none"
-                />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-transparent">
-              <div className="bg-[var(--color-sidebar-bg)] rounded-2xl shadow-md border-2 border-[var(--color-line)] overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="text-xs text-zinc-500 uppercase bg-zinc-50 border-b border-zinc-200">
-                      <tr>
-                        <th className="px-4 py-3 font-bold">Paquete</th>
-                        <th className="px-4 py-3 font-bold">Ubicación</th>
-                        <th className="px-4 py-3 font-bold">Concepto</th>
-                        <th className="px-4 py-3 font-bold">Material</th>
-                        <th className="px-4 py-3 font-bold">Unidad</th>
-                        <th className="px-4 py-3 font-bold text-right">Existencia Inicial (Presupuesto)</th>
-                        <th className="px-4 py-3 font-bold text-right">Salidas</th>
-                        <th className="px-4 py-3 font-bold text-right">Saldo (Nueva Existencia)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {budgets.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="px-4 py-8 text-center text-zinc-500">
-                            No hay datos de presupuesto cargados. Sube un archivo Excel para comenzar.
-                          </td>
-                        </tr>
-                      ) : (
-                        budgets.filter(b => {
-                          if (showOnlyExceeded && b.saldoTotal >= 0) return false;
-                          if (filterPaquete && !b.paquete.toLowerCase().includes(filterPaquete.toLowerCase())) return false;
-                          if (filterUbicacion && !b.ubicacion.toLowerCase().includes(filterUbicacion.toLowerCase())) return false;
-                          if (filterConcepto && !b.concepto.toLowerCase().includes(filterConcepto.toLowerCase())) return false;
-                          if (filterMaterial && !b.material.toLowerCase().includes(filterMaterial.toLowerCase())) return false;
-                          if (filterUnidad && !b.unidad.toLowerCase().includes(filterUnidad.toLowerCase())) return false;
-                          return true;
-                        }).map((b) => (
-                          <tr key={b.id} className={cn("hover:bg-zinc-50 transition-colors", b.saldoTotal < 0 ? "bg-red-50 hover:bg-red-100" : "")}>
-                            <td className="px-4 py-3 font-medium text-zinc-900">{b.paquete}</td>
-                            <td className="px-4 py-3 text-zinc-600">{b.ubicacion}</td>
-                            <td className="px-4 py-3 text-zinc-600">{b.concepto}</td>
-                            <td className="px-4 py-3 text-zinc-600 font-medium">{b.material}</td>
-                            <td className="px-4 py-3 text-zinc-600">{b.unidad}</td>
-                            <td className="px-4 py-3 text-zinc-900 text-right font-mono">{b.cantidadPresupuesto.toFixed(2)}</td>
-                            <td className="px-4 py-3 text-zinc-900 text-right font-mono">{b.salidas.toFixed(2)}</td>
-                            <td className={cn("px-4 py-3 text-right font-mono font-bold", b.saldoTotal < 0 ? "text-red-600" : "text-black")}>
-                              {b.saldoTotal.toFixed(2)}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Usuarios Tab */}
         {activeTab === 'usuarios' && (
@@ -4218,58 +3895,6 @@ export default function App() {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Delete Budget Modal */}
-        {showDeleteBudgetModal && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[var(--color-sidebar-bg)] rounded-3xl shadow-2xl border-2 border-[var(--color-line)] w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
-              <div className="p-6 bg-red-600 text-white flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle size={24} />
-                  <h3 className="text-xl font-bold">Eliminar Existencias</h3>
-                </div>
-                <button 
-                  onClick={() => setShowDeleteBudgetModal(false)}
-                  className="hover:bg-white/20 p-2 rounded-full transition-colors"
-                  disabled={isDeletingBudget}
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="p-6">
-                <p className="text-zinc-600 mb-6">
-                  ¿Estás seguro de que deseas eliminar todas las existencias/presupuesto actuales? Esta acción no se puede deshacer.
-                </p>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowDeleteBudgetModal(false)}
-                    className="px-4 py-2 text-zinc-600 hover:bg-zinc-100 rounded-xl font-medium transition-colors"
-                    disabled={isDeletingBudget}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={handleDeleteBudget}
-                    disabled={isDeletingBudget}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-colors flex items-center gap-2"
-                  >
-                    {isDeletingBudget ? (
-                      <>
-                        <RefreshCw size={18} className="animate-spin" />
-                        Eliminando...
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 size={18} />
-                        Eliminar Todo
-                      </>
-                    )}
-                  </button>
                 </div>
               </div>
             </div>
